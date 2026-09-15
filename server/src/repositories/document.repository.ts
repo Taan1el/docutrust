@@ -183,14 +183,14 @@ export class DocumentRepository {
       .run(status, completedAt ?? null, new Date().toISOString(), documentId);
   }
 
-  updateDocumentContent(documentId: string, newContent: string, newHash: string): void {
+  updateDocumentContent(documentId: string, newTitle: string, newContent: string, newHash: string): void {
     this.db
       .prepare(`
         UPDATE documents
-        SET content = ?, content_hash = ?, updated_at = ?
+        SET title = ?, content = ?, content_hash = ?, updated_at = ?
         WHERE id = ?
       `)
-      .run(newContent, newHash, new Date().toISOString(), documentId);
+      .run(newTitle, newContent, newHash, new Date().toISOString(), documentId);
   }
 
   addAuditEvent(event: AuditEvent): void {

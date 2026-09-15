@@ -3,10 +3,11 @@ import type {
   DocumentRecord,
   DocumentSigner,
   AuditEvent,
-  CreateDocumentPayload,
   VerificationResult,
   SignerVerification,
 } from '../../../shared/types.js';
+import { conflict, notFound } from '../../../shared/errors.js';
+import { parseCreateDocumentPayload, type TamperPayload } from '../../../shared/validation.js';
 import { DocumentRepository } from '../repositories/document.repository.js';
 import { CryptoService } from './crypto.service.js';
 
@@ -16,19 +17,14 @@ export class SigningService {
     private cryptoService: CryptoService
   ) {}
 
-  createDocument(payload: CreateDocumentPayload, actorName = 'Document Creator'): DocumentRecord {
-    if (!payload.title || !payload.content) {
-      throw new Error('Title and content are required');
-    }
-    if (!payload.signers || payload.signers.length === 0) {
-      throw new Error('At least one signer is required');
-    }
+  createDocument(payload: unknown, actorName = 'Document Creator'): DocumentRecord {
+    const input = parseCreateDocumentPayload(payload);
 
     const docId = `doc_${crypto.randomBytes(8).toString('hex')}`;
-    const contentHash = this.cryptoService.hashDocumentContent(payload.content);
+    const contentHash = this.cryptoService.hashDocument(input.title, input.content);
     const now = new Date().toISOString();
 
-    const signers: DocumentSigner[] = payload.signers.map((s, idx) => ({
+    const signers: DocumentSigner[] = input.signers.map((s, idx) => ({
       id: `sig_${crypto.randomBytes(6).toString('hex')}_${idx + 1}`,
       documentId: docId,
       name: s.name,
@@ -43,7 +39,7 @@ export class SigningService {
       action: 'DOCUMENT_CREATED',
       actorName,
       details: {
-        title: payload.title,
+        title: input.title,
         contentHash,
         signerCount: signers.length,
       },
@@ -53,8 +49,8 @@ export class SigningService {
     this.docRepo.createDocument(
       {
         id: docId,
-        title: payload.title,
-        content: payload.content,
+        title: input.title,
+        content: input.content,
         contentHash,
         status: 'PENDING_SIGNATURES',
         createdAt: now,
@@ -77,19 +73,21 @@ export class SigningService {
     userAgent = 'DocuTrust-Signer/1.0'
   ): DocumentRecord {
     const doc = this.docRepo.getDocumentById(documentId);
-    if (!doc) throw new Error(`Document not found: ${documentId}`);
+    if (!doc) throw notFound(`Document not found: ${documentId}`);
 
     const signer = doc.signers.find((s) => s.id === signerId);
-    if (!signer) throw new Error(`Signer not found: ${signerId}`);
+    if (!signer) throw notFound(`Signer not found: ${signerId}`);
 
     if (signer.status === 'SIGNED') {
-      throw new Error(`Signer ${signer.name} has already signed this document`);
+      throw conflict(`Signer ${signer.name} has already signed this document`);
     }
 
     let privateKey = providedPrivateKeyPem;
     let publicKey = signer.publicKeyPem;
 
-    // If no keypair provided, generate an ECDSA P-256 keypair (simulating e-ID smart card hardware token)
+    // If no keypair provided, generate an ECDSA P-256 keypair standing in for
+    // a signer who does not already hold one (the app never asks anyone to
+    // bring their own key through the UI).
     if (!privateKey || !publicKey) {
       const keyBundle = this.cryptoService.generateKeyPair('ECDSA_P256_SHA256');
       privateKey = keyBundle.privateKeyPem;
@@ -141,7 +139,7 @@ export class SigningService {
         id: `aud_${crypto.randomBytes(6).toString('hex')}`,
         documentId,
         action: 'DOCUMENT_SEALED',
-        actorName: 'DocuTrust PKI Authority',
+        actorName: 'DocuTrust',
         details: {
           status: 'COMPLETED',
           totalSignatures: updatedDoc.signers.length,
@@ -156,9 +154,9 @@ export class SigningService {
 
   verifyDocument(documentId: string): VerificationResult {
     const doc = this.docRepo.getDocumentById(documentId);
-    if (!doc) throw new Error(`Document not found: ${documentId}`);
+    if (!doc) throw notFound(`Document not found: ${documentId}`);
 
-    const currentHash = this.cryptoService.hashDocumentContent(doc.content);
+    const currentHash = this.cryptoService.hashDocument(doc.title, doc.content);
     const isTampered = currentHash !== doc.contentHash;
 
     const signerVerifications: SignerVerification[] = [];
@@ -200,10 +198,10 @@ export class SigningService {
         isSignatureValid,
         keyFingerprint,
         error: isTampered
-          ? 'Document hash mismatch: Cryptographic seal broken by unauthorized modification'
+          ? 'Document hash mismatch: title or content changed after signing'
           : isSignatureValid
             ? undefined
-            : 'Public key mathematical verification failed',
+            : 'Public key verification failed',
       });
     }
 
@@ -237,13 +235,20 @@ export class SigningService {
     };
   }
 
-  simulateTamper(documentId: string, tamperedContent: string): DocumentRecord {
+  /**
+   * Simulates unauthorized database tampering: the title and/or content are
+   * overwritten while the sealed content_hash is left exactly as it was at
+   * signing time, so the next verification recomputes a different hash and
+   * reports every signature as broken. Real edits never go through this path.
+   */
+  simulateTamper(documentId: string, tamper: TamperPayload): DocumentRecord {
     const doc = this.docRepo.getDocumentById(documentId);
-    if (!doc) throw new Error(`Document not found: ${documentId}`);
+    if (!doc) throw notFound(`Document not found: ${documentId}`);
 
-    // Maliciously update the document content in the DB WITHOUT updating the sealed content_hash!
-    // This replicates unauthorized database alteration or man-in-the-middle tampering.
-    this.docRepo.updateDocumentContent(documentId, tamperedContent, doc.contentHash);
+    const newTitle = tamper.tamperedTitle ?? doc.title;
+    const newContent = tamper.tamperedContent ?? doc.content;
+
+    this.docRepo.updateDocumentContent(documentId, newTitle, newContent, doc.contentHash);
 
     this.docRepo.addAuditEvent({
       id: `aud_${crypto.randomBytes(6).toString('hex')}`,
@@ -251,9 +256,9 @@ export class SigningService {
       action: 'MALICIOUS_TAMPER_SIMULATED',
       actorName: 'Adversary Simulator',
       details: {
-        originalLength: doc.content.length,
-        tamperedLength: tamperedContent.length,
-        note: 'Document text modified while retaining original cryptographic seal hash',
+        titleChanged: newTitle !== doc.title,
+        contentChanged: newContent !== doc.content,
+        note: 'Document title and/or content modified while retaining the original cryptographic seal hash',
       },
       timestamp: new Date().toISOString(),
     });

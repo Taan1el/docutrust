@@ -1,16 +1,16 @@
 import { DatabaseSync } from 'node:sqlite';
 import path from 'node:path';
 import fs from 'node:fs';
+import { defaultDbPath } from '../config.js';
 
 export function createDatabase(dbPath?: string): DatabaseSync {
-  let finalPath = dbPath;
+  const finalPath = dbPath || defaultDbPath;
 
-  if (!finalPath) {
-    const dataDir = path.resolve(process.cwd(), 'data');
-    if (!fs.existsSync(dataDir)) {
-      fs.mkdirSync(dataDir, { recursive: true });
-    }
-    finalPath = path.join(dataDir, 'docutrust.db');
+  // path.dirname(':memory:') resolves harmlessly to '.', which always
+  // exists, so in-memory databases (used by the test suite) skip this.
+  const dir = path.dirname(finalPath);
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
   }
 
   const db = new DatabaseSync(finalPath);

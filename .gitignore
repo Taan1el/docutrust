@@ -1,7 +1,16 @@
 node_modules
 dist
+dist-pages
 .env
-data/*.db*
+.env.*
+!.env.example
+server/data/
+*.db
+*.db-*
+*.sqlite*
 coverage
+playwright-report
+test-results
 *.log
 .DS_Store
+Thumbs.db

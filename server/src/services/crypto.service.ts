@@ -1,5 +1,23 @@
 import crypto from 'node:crypto';
 import type { KeypairBundle, SignatureAlgorithm } from '../../../shared/types.js';
+import { buildDocumentDigestInput } from '../../../shared/canonical.js';
+
+/**
+ * Reads the key type (`'ec'` or `'rsa'`) directly off the PEM instead of
+ * trusting a caller-supplied algorithm label, so signing and verification
+ * always use the padding the key actually requires.
+ */
+function asymmetricKeyType(pem: string): string | undefined {
+  try {
+    return crypto.createPrivateKey(pem).asymmetricKeyType;
+  } catch {
+    try {
+      return crypto.createPublicKey(pem).asymmetricKeyType;
+    } catch {
+      return undefined;
+    }
+  }
+}
 
 export class CryptoService {
   generateKeyPair(algorithm: SignatureAlgorithm = 'ECDSA_P256_SHA256'): KeypairBundle {
@@ -10,41 +28,35 @@ export class CryptoService {
         privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
       });
 
-      const fingerprint = this.computeKeyFingerprint(publicKey);
-
       return {
         publicKeyPem: publicKey,
         privateKeyPem: privateKey,
-        fingerprint,
-        algorithm,
-      };
-    } else {
-      const { publicKey, privateKey } = crypto.generateKeyPairSync('rsa', {
-        modulusLength: 2048,
-        publicKeyEncoding: { type: 'spki', format: 'pem' },
-        privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
-      });
-
-      const fingerprint = this.computeKeyFingerprint(publicKey);
-
-      return {
-        publicKeyPem: publicKey,
-        privateKeyPem: privateKey,
-        fingerprint,
+        fingerprint: this.computeKeyFingerprint(publicKey),
         algorithm,
       };
     }
+
+    const { publicKey, privateKey } = crypto.generateKeyPairSync('rsa', {
+      modulusLength: 2048,
+      publicKeyEncoding: { type: 'spki', format: 'pem' },
+      privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
+    });
+
+    return {
+      publicKeyPem: publicKey,
+      privateKeyPem: privateKey,
+      fingerprint: this.computeKeyFingerprint(publicKey),
+      algorithm,
+    };
   }
 
-  canonicalizeContent(content: string): string {
-    return content
-      .replace(/\r\n/g, '\n')
-      .replace(/\r/g, '\n')
-      .trim();
-  }
-
-  hashDocumentContent(content: string): string {
-    const canonical = this.canonicalizeContent(content);
+  /**
+   * Hashes title and content together (see shared/canonical.ts) so that
+   * altering either field after signing changes the digest, not just edits
+   * to the body text.
+   */
+  hashDocument(title: string, content: string): string {
+    const canonical = buildDocumentDigestInput(title, content);
     return crypto.createHash('sha256').update(canonical, 'utf8').digest('hex');
   }
 
@@ -55,10 +67,26 @@ export class CryptoService {
     return crypto.createHash('sha256').update(der).digest('hex').substring(0, 32);
   }
 
+  /**
+   * Signs a document hash. EC keys sign directly; RSA keys use RSA-PSS
+   * (rather than the createSign/createVerify default of PKCS#1 v1.5) so the
+   * "RSA-PSS" the app documents is the padding actually used.
+   */
   signHash(contentHash: string, privateKeyPem: string): string {
     const sign = crypto.createSign('SHA256');
     sign.update(contentHash, 'utf8');
     sign.end();
+
+    if (asymmetricKeyType(privateKeyPem) === 'rsa') {
+      return sign.sign(
+        {
+          key: privateKeyPem,
+          padding: crypto.constants.RSA_PKCS1_PSS_PADDING,
+          saltLength: crypto.constants.RSA_PSS_SALTLEN_DIGEST,
+        },
+        'hex'
+      );
+    }
     return sign.sign(privateKeyPem, 'hex');
   }
 
@@ -67,6 +95,18 @@ export class CryptoService {
       const verify = crypto.createVerify('SHA256');
       verify.update(contentHash, 'utf8');
       verify.end();
+
+      if (asymmetricKeyType(publicKeyPem) === 'rsa') {
+        return verify.verify(
+          {
+            key: publicKeyPem,
+            padding: crypto.constants.RSA_PKCS1_PSS_PADDING,
+            saltLength: crypto.constants.RSA_PSS_SALTLEN_DIGEST,
+          },
+          signatureHex,
+          'hex'
+        );
+      }
       return verify.verify(publicKeyPem, signatureHex, 'hex');
     } catch {
       return false;
