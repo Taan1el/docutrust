@@ -37,7 +37,7 @@ export const DocumentList: React.FC<DocumentListProps> = ({
         </div>
       </div>
 
-      <div style={{ display: 'flex', flexDirection: 'column' }}>
+      <div className="doc-list" role="listbox" aria-label="Agreements">
         {documents.map((doc) => {
           const isSelected = doc.id === selectedDocId;
           const signedCount = doc.signers.filter((s) => s.status === 'SIGNED').length;
@@ -53,8 +53,11 @@ export const DocumentList: React.FC<DocumentListProps> = ({
           }
 
           return (
-            <div
+            <button
               key={doc.id}
+              type="button"
+              role="option"
+              aria-selected={isSelected}
               className={`doc-list-item ${isSelected ? 'selected' : ''}`}
               onClick={() => onSelectDoc(doc.id)}
             >
@@ -72,7 +75,7 @@ export const DocumentList: React.FC<DocumentListProps> = ({
               <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
                 Signers: {doc.signers.map((s) => s.name).join(', ')}
               </div>
-            </div>
+            </button>
           );
         })}
       </div>

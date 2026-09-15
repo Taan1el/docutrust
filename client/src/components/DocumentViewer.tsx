@@ -74,9 +74,10 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
             <line x1="9" y1="9" x2="15" y2="15" />
           </svg>
           <div>
-            <strong style={{ fontSize: '0.95rem' }}>CRITICAL: Cryptographic Seal Violation Detected!</strong>
+            <strong style={{ fontSize: '0.95rem' }}>Cryptographic Seal Broken</strong>
             <p style={{ fontSize: '0.82rem', marginTop: '0.15rem' }}>
-              The current document text does not match the original SHA-256 digest signed by participants. All digital signatures have been mathematically invalidated.
+              The title or content no longer matches the SHA-256 digest that was signed. Every signature below fails
+              verification against the current text.
             </p>
           </div>
         </div>
@@ -89,10 +90,10 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
               <polyline points="20 6 9 17 4 12" />
             </svg>
-            All Digital Signatures Valid &amp; Seal Intact
+            All Signatures Valid &amp; Seal Intact
           </div>
           <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
-            Verified against public key certificates via ECDSA P-256. Zero tampering detected.
+            Verified against each signer's stored public key. No tampering detected.
           </p>
         </div>
       )}
@@ -104,7 +105,7 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
 
       {/* Signers & Digital Stamps */}
       <div className="signatures-section">
-        <h3 style={{ fontSize: '1rem', fontWeight: 700 }}>Signatures &amp; Public-Key Certificates</h3>
+        <h3 style={{ fontSize: '1rem', fontWeight: 700 }}>Signatures &amp; Public Keys</h3>
 
         <div className="signers-grid">
           {document.signers.map((signer) => {
@@ -117,7 +118,7 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
               >
                 {isSigned && (
                   <div className="stamp-seal">
-                    Valid<br />e-ID Seal
+                    Signed<br />&amp; Sealed
                   </div>
                 )}
 
@@ -142,7 +143,7 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
                     <div style={{ fontSize: '0.72rem', fontFamily: 'var(--font-mono)', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
                       Key Fingerprint: {signer.publicKeyPem ? signer.publicKeyPem.substring(28, 48) : 'ECDSA-P256'}...<br />
                       Signed: {signer.signedAt ? new Date(signer.signedAt).toLocaleString() : ''}<br />
-                      Client: {signer.userAgent || 'Smart-ID'} ({signer.ipAddress})
+                      Client: {signer.userAgent || 'DocuTrust Web Client'} ({signer.ipAddress})
                     </div>
                   </>
                 ) : (
@@ -162,19 +163,21 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
         </div>
       </div>
 
-      {/* Collapsible Immutable Audit Log */}
+      {/* Collapsible audit log */}
       <div style={{ padding: '0 1.5rem 1.5rem 1.5rem' }}>
         <button
           className="btn btn-secondary"
           onClick={() => setShowAuditTrail(!showAuditTrail)}
+          aria-expanded={showAuditTrail}
+          aria-controls="audit-trail-panel"
           style={{ width: '100%', justifyContent: 'space-between' }}
         >
-          <span>Immutable Cryptographic Audit Trail ({document.auditTrail?.length || 0} events)</span>
+          <span>Audit Trail ({document.auditTrail?.length || 0} events)</span>
           <span>{showAuditTrail ? '▲ Hide' : '▼ View'}</span>
         </button>
 
         {showAuditTrail && document.auditTrail && (
-          <div className="audit-list">
+          <div className="audit-list" id="audit-trail-panel">
             {document.auditTrail.map((ev) => (
               <div key={ev.id} className="audit-entry">
                 <div>

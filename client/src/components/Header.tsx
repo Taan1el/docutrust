@@ -21,13 +21,14 @@ export const Header: React.FC<HeaderProps> = ({
           </svg>
         </div>
         <div>
-          <div className="brand-title">DocuTrust</div>
-          <div className="brand-sub">PKI Digital Signatures & Tamper Verification</div>
+          <h1 className="brand-title">DocuTrust</h1>
+          <div className="brand-sub">Asymmetric Digital Signatures & Tamper Detection</div>
         </div>
       </div>
 
       <div className="header-actions">
-        <button className="btn btn-secondary" onClick={onRefresh} title="Refresh documents">
+        <button className="btn btn-secondary" onClick={onRefresh} aria-label={`Refresh agreements (${documentCount} loaded)`}>
+
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <path d="M23 4v6h-6" />
             <path d="M1 20v-6h6" />

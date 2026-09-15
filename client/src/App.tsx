@@ -156,6 +156,7 @@ export const App: React.FC = () => {
       <TamperSimulatorModal
         isOpen={isTamperOpen}
         documentId={selectedDocId || ''}
+        currentTitle={selectedDoc?.title || ''}
         currentContent={selectedDoc?.content || ''}
         onClose={() => setIsTamperOpen(false)}
         onTampered={handleDocumentUpdated}

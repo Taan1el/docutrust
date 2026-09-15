@@ -93,81 +93,84 @@ describe('DocuTrust Client Dashboard Component', () => {
     );
   });
 
-  it('renders application brand title and create button', async () => {
+  /** Waits for the create/list/verify fetch chain to settle so later tests do not see stray state updates. */
+  async function renderAndSettle() {
     render(<App />);
+    await screen.findByText('All Signatures Valid & Seal Intact');
+  }
 
-    expect(screen.getByText('DocuTrust')).toBeInTheDocument();
-    expect(screen.getByText('PKI Digital Signatures & Tamper Verification')).toBeInTheDocument();
+  it('renders the application brand heading and create button', async () => {
+    await renderAndSettle();
+
+    expect(screen.getByRole('heading', { name: 'DocuTrust' })).toBeInTheDocument();
+    expect(screen.getByText('Asymmetric Digital Signatures & Tamper Detection')).toBeInTheDocument();
     expect(screen.getByText('New Agreement')).toBeInTheDocument();
   });
 
-  it('displays document list and agreement parchment view', async () => {
-    render(<App />);
+  it('displays the document list and agreement view', async () => {
+    await renderAndSettle();
+
+    expect(screen.getAllByText('Consulting Services Agreement').length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText(/The Consultant agrees to provide security architecture advice/i)).toBeInTheDocument();
+    expect(screen.getAllByText('Liis Tamm').length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText('Oliver Mets').length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('selects a document from the list with a real button, so it is reachable by keyboard', async () => {
+    await renderAndSettle();
+
+    const listEntry = screen.getByRole('option', { name: /Consulting Services Agreement/ });
+    expect(listEntry.tagName).toBe('BUTTON');
+    expect(listEntry).toHaveAttribute('aria-selected', 'true');
+  });
+
+  it('opens the Create Agreement modal with labeled fields, and closes it on Escape', async () => {
+    await renderAndSettle();
+
+    fireEvent.click(screen.getByText('New Agreement'));
+
+    expect(screen.getByRole('dialog', { name: 'Draft New Agreement' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Document Title:')).toBeInTheDocument();
+    expect(screen.getByLabelText('Agreement Content / Terms:')).toBeInTheDocument();
+    expect(screen.getByLabelText('Signer 1 full name')).toBeInTheDocument();
+    expect(screen.getByLabelText('Signer 1 email address')).toBeInTheDocument();
+
+    fireEvent.keyDown(document, { key: 'Escape' });
 
     await waitFor(() => {
-      expect(screen.getAllByText('Consulting Services Agreement').length).toBeGreaterThanOrEqual(1);
-      expect(screen.getByText(/The Consultant agrees to provide security architecture advice/i)).toBeInTheDocument();
-      expect(screen.getAllByText('Liis Tamm').length).toBeGreaterThanOrEqual(1);
-      expect(screen.getAllByText('Oliver Mets').length).toBeGreaterThanOrEqual(1);
+      expect(screen.queryByRole('dialog', { name: 'Draft New Agreement' })).not.toBeInTheDocument();
     });
   });
 
-  it('opens and closes the Create Agreement modal', async () => {
-    render(<App />);
+  it('opens and closes the sign modal from a signer card', async () => {
+    await renderAndSettle();
 
-    const newBtn = screen.getByText('New Agreement');
-    fireEvent.click(newBtn);
+    fireEvent.click(screen.getByText('Execute Digital Signature'));
 
-    expect(screen.getByText('Draft New Cryptographic Agreement')).toBeInTheDocument();
-    expect(screen.getByPlaceholderText(/e.g. Master Services Agreement/i)).toBeInTheDocument();
+    expect(screen.getByRole('dialog', { name: 'Sign Agreement' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Confirm & Sign' })).toBeInTheDocument();
 
-    const cancelBtn = screen.getByText('Cancel');
-    fireEvent.click(cancelBtn);
+    fireEvent.click(screen.getByText('Cancel'));
 
     await waitFor(() => {
-      expect(screen.queryByText('Draft New Cryptographic Agreement')).not.toBeInTheDocument();
+      expect(screen.queryByRole('dialog', { name: 'Sign Agreement' })).not.toBeInTheDocument();
     });
   });
 
-  it('opens and closes the Digital Signing ceremony modal', async () => {
-    render(<App />);
+  it('opens the tamper simulator with the current title and content prefilled', async () => {
+    await renderAndSettle();
 
-    await waitFor(() => {
-      expect(screen.getByText('Execute Digital Signature')).toBeInTheDocument();
-    });
+    fireEvent.click(screen.getByText('Simulate Tampering'));
 
-    const signBtn = screen.getByText('Execute Digital Signature');
-    fireEvent.click(signBtn);
-
-    expect(screen.getByText('Digital Signing Ceremony (Smart-ID / e-ID)')).toBeInTheDocument();
-    expect(screen.getByText('Sign Agreement')).toBeInTheDocument();
-
-    const cancelBtn = screen.getByText('Cancel');
-    fireEvent.click(cancelBtn);
-
-    await waitFor(() => {
-      expect(screen.queryByText('Digital Signing Ceremony (Smart-ID / e-ID)')).not.toBeInTheDocument();
-    });
-  });
-
-  it('opens and closes the Tamper Simulator modal', async () => {
-    render(<App />);
-
-    await waitFor(() => {
-      expect(screen.getByText('Simulate Tampering')).toBeInTheDocument();
-    });
-
-    const tamperBtn = screen.getByText('Simulate Tampering');
-    fireEvent.click(tamperBtn);
-
-    expect(screen.getByText('Tamper Detection Simulator')).toBeInTheDocument();
+    const dialog = screen.getByRole('dialog', { name: 'Tamper Detection Simulator' });
+    expect(dialog).toBeInTheDocument();
+    expect(screen.getByLabelText('Title:')).toHaveValue('Consulting Services Agreement');
     expect(screen.getByText('+ Inject Malicious Clause')).toBeInTheDocument();
 
-    const cancelBtn = screen.getByText('Cancel');
-    fireEvent.click(cancelBtn);
+    fireEvent.click(screen.getByText('Cancel'));
 
     await waitFor(() => {
-      expect(screen.queryByText('Tamper Detection Simulator')).not.toBeInTheDocument();
+      expect(screen.queryByRole('dialog', { name: 'Tamper Detection Simulator' })).not.toBeInTheDocument();
     });
   });
 });

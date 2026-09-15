@@ -4,6 +4,7 @@ import type {
   VerificationResult,
   ApiResponse,
 } from '../../../shared/types.js';
+import type { TamperPayload } from '../../../shared/validation.js';
 
 const API_BASE = '/api';
 
@@ -59,14 +60,11 @@ export async function verifyDocument(documentId: string): Promise<VerificationRe
   return json.data;
 }
 
-export async function simulateTamper(
-  documentId: string,
-  tamperedContent: string
-): Promise<DocumentRecord> {
+export async function simulateTamper(documentId: string, tamper: TamperPayload): Promise<DocumentRecord> {
   const res = await fetch(`${API_BASE}/documents/${documentId}/tamper`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ tamperedContent }),
+    body: JSON.stringify(tamper),
   });
   const json: ApiResponse<DocumentRecord> = await res.json();
   if (!json.success || !json.data) throw new Error(json.error || 'Tamper simulation failed');

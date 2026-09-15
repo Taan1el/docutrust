@@ -34,8 +34,8 @@ export function seedDatabase(db: DatabaseSync): void {
   );
 
   // Sign both signers
-  service.signDocument(gdprDoc.id, gdprDoc.signers[0].id, undefined, '195.250.186.12', 'Smart-ID App v3.4');
-  service.signDocument(gdprDoc.id, gdprDoc.signers[1].id, undefined, '80.235.48.91', 'e-Residency DigiDoc4 v5.2');
+  service.signDocument(gdprDoc.id, gdprDoc.signers[0].id, undefined, '195.250.186.12', 'DocuTrust Web Client');
+  service.signDocument(gdprDoc.id, gdprDoc.signers[1].id, undefined, '80.235.48.91', 'DocuTrust Web Client');
 
   // 2. Partially signed SaaS MSA
   const msaDoc = service.createDocument(
@@ -59,7 +59,7 @@ export function seedDatabase(db: DatabaseSync): void {
   );
 
   // Sign first signer
-  service.signDocument(msaDoc.id, msaDoc.signers[0].id, undefined, '194.126.115.4', 'Estonian ID-Card Client 24.6');
+  service.signDocument(msaDoc.id, msaDoc.signers[0].id, undefined, '194.126.115.4', 'DocuTrust Web Client');
 
   // 3. Pending SAFE Equity Instrument
   service.createDocument(
