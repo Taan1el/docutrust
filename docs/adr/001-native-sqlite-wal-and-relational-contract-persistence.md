@@ -15,7 +15,7 @@ For DocuTrust, we required:
 1. **Node.js 24 Native `node:sqlite` in WAL Mode**:
    - Utilize Node.js's built-in `DatabaseSync` engine running in Write-Ahead Logging mode (`PRAGMA journal_mode = WAL;`).
    - Enforce relational constraints via `PRAGMA foreign_keys = ON;`.
-   - Separate data into `documents` (content, canonical hash, status), `signers` (identity, public key PEM, signature hex, timestamp, IP), and `audit_events` (immutable chronological event trail).
+   - Separate data into `documents` (content, canonical hash, status), `signers` (identity, public key PEM, signature hex, timestamp, IP), and `audit_events` (append-only chronological event trail; the application only ever inserts rows here, though nothing at the database layer prevents a row from being edited directly, see ADR 003).
 
 2. **Atomic Multi-Entity Transactions**:
    - Creating an agreement commits the document, signers, and initial creation audit event inside an isolated SQLite transaction (`BEGIN TRANSACTION ... COMMIT;`).
