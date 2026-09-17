@@ -20,7 +20,7 @@
 2. **Canonical SHA-256 Document Hashing**: Content is standardized across line endings (`\r\n` vs `\n`) and hashed into an immutable 256-bit digest prior to signing, preventing platform-specific hashing discrepancies.
 3. **Multi-Party Signing Finite State Machine**: Manages contract lifecycle transitions (`DRAFT` &rarr; `PENDING_SIGNATURES` &rarr; `PARTIALLY_SIGNED` &rarr; `COMPLETED` / `SEALED`) with designated signer roles and verification certificates.
 4. **Instant Tamper Detection & Seal Breach**: The verification engine re-hashes the agreement content dynamically. If a single character is altered after signing, the cryptographic seal breaks instantly, alerting users with a glowing red tamper banner.
-5. **Interactive Tamper Testing Sandbox**: Built-in evaluation tool allowing engineers to inject modified contract terms and witness instant mathematical signature invalidation.
+5. **Interactive Tamper Testing Sandbox**: Built-in evaluation tool allowing users to inject modified contract terms and witness instant mathematical signature invalidation.
 6. **Immutable Cryptographic Audit Trail**: Chronologically records all actions (`DOCUMENT_CREATED`, `DOCUMENT_SIGNED`, `DOCUMENT_SEALED`, `VERIFICATION_PERFORMED`, `TAMPER_DETECTED`) with timestamps, IP addresses, and user-agent metadata.
 
 ---
