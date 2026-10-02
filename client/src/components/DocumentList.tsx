@@ -1,5 +1,6 @@
 import React from 'react';
 import type { DocumentRecord } from '../../../shared/types.js';
+import { formatTimestamp } from '../utils/format.js';
 
 interface DocumentListProps {
   documents: DocumentRecord[];
@@ -8,77 +9,74 @@ interface DocumentListProps {
   loading: boolean;
 }
 
-export const DocumentList: React.FC<DocumentListProps> = ({
-  documents,
-  selectedDocId,
-  onSelectDoc,
-  loading,
-}) => {
-  if (loading && documents.length === 0) {
+export function statusOf(doc: DocumentRecord): { tone: 'ok' | 'warn' | 'bad'; label: string } {
+  if (doc.status === 'COMPLETED') return { tone: 'ok', label: 'Fully signed' };
+  if (doc.status === 'REJECTED') return { tone: 'bad', label: 'Rejected' };
+  if (doc.status === 'PARTIALLY_SIGNED') return { tone: 'warn', label: 'Partially signed' };
+  return { tone: 'warn', label: 'Waiting on signers' };
+}
+
+export const DocumentList: React.FC<DocumentListProps> = ({ documents, selectedDocId, onSelectDoc, loading }) => {
+  if (documents.length === 0) {
     return (
-      <div className="panel-card" style={{ padding: '2rem', textAlign: 'center' }}>
-        <p style={{ color: 'var(--text-secondary)' }}>Loading cryptographic agreements...</p>
-      </div>
+      <p className="empty-note">{loading ? 'Loading agreements.' : 'No agreements yet. Create one to start signing.'}</p>
     );
   }
 
   return (
-    <div className="panel-card">
-      <div className="panel-header">
-        <div className="panel-title">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-            <polyline points="14 2 14 8 20 8" />
-            <line x1="16" y1="13" x2="8" y2="13" />
-            <line x1="16" y1="17" x2="8" y2="17" />
-            <polyline points="10 9 9 9 8 9" />
-          </svg>
-          Agreements ({documents.length})
-        </div>
-      </div>
-
-      <div className="doc-list" role="listbox" aria-label="Agreements">
-        {documents.map((doc) => {
-          const isSelected = doc.id === selectedDocId;
-          const signedCount = doc.signers.filter((s) => s.status === 'SIGNED').length;
-
-          let badgeClass = 'badge-pending';
-          let label = 'Pending';
-          if (doc.status === 'COMPLETED') {
-            badgeClass = 'badge-completed';
-            label = 'Sealed & Valid';
-          } else if (doc.status === 'PARTIALLY_SIGNED') {
-            badgeClass = 'badge-partial';
-            label = `Partially Signed (${signedCount}/${doc.signers.length})`;
-          }
-
-          return (
-            <button
-              key={doc.id}
-              type="button"
-              role="option"
-              aria-selected={isSelected}
-              className={`doc-list-item ${isSelected ? 'selected' : ''}`}
-              onClick={() => onSelectDoc(doc.id)}
-            >
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                <span className="doc-title">{doc.title}</span>
-              </div>
-
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '0.2rem' }}>
-                <span style={{ fontSize: '0.75rem', fontFamily: 'var(--font-mono)', color: 'var(--text-muted)' }}>
-                  {doc.id}
-                </span>
-                <span className={`badge-status ${badgeClass}`}>{label}</span>
-              </div>
-
-              <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-                Signers: {doc.signers.map((s) => s.name).join(', ')}
-              </div>
-            </button>
-          );
-        })}
-      </div>
+    <div className="table-wrap">
+      <table className="doc-table">
+        <thead>
+          <tr>
+            <th scope="col">Agreement</th>
+            <th scope="col">Status</th>
+            <th scope="col">Signed</th>
+            <th scope="col">Created</th>
+          </tr>
+        </thead>
+        <tbody>
+          {documents.map((doc) => {
+            const isSelected = doc.id === selectedDocId;
+            const signedCount = doc.signers.filter((s) => s.status === 'SIGNED').length;
+            const total = doc.signers.length;
+            const status = statusOf(doc);
+            return (
+              <tr key={doc.id} className={isSelected ? 'is-selected' : undefined}>
+                <td data-label="Agreement">
+                  <button type="button" className="row-btn" aria-pressed={isSelected} onClick={() => onSelectDoc(doc.id)}>
+                    {doc.title}
+                  </button>
+                  <span className="cell-sub">{doc.signers.map((s) => s.name).join(', ')}</span>
+                </td>
+                <td data-label="Status">
+                  <span className="status">
+                    <span className={`status-dot ${status.tone}`} aria-hidden="true" />
+                    {status.label}
+                  </span>
+                </td>
+                <td data-label="Signed">
+                  <span className="signed-cell">
+                    <span
+                      className="meter meter-sm"
+                      role="meter"
+                      aria-label={`Signatures on ${doc.title}`}
+                      aria-valuenow={signedCount}
+                      aria-valuemin={0}
+                      aria-valuemax={total}
+                    >
+                      <span className="meter-fill" style={{ width: `${total ? (signedCount / total) * 100 : 0}%` }} />
+                    </span>
+                    <span className="mono">{`${signedCount} / ${total}`}</span>
+                  </span>
+                </td>
+                <td data-label="Created" className="mono">
+                  {formatTimestamp(doc.createdAt)}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
     </div>
   );
 };

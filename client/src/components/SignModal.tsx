@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { signDocument } from '../services/api.js';
+import { X } from 'lucide-react';
+import { signDocument } from '../services/index.js';
 import { Modal } from './Modal.js';
 
 interface SignModalProps {
@@ -33,8 +34,8 @@ export const SignModal: React.FC<SignModalProps> = ({
       await signDocument(documentId, signerId);
       onSigned();
       onClose();
-    } catch (err: any) {
-      setError(err.message || 'Signing failed');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Signing failed');
     } finally {
       setLoading(false);
     }
@@ -43,47 +44,34 @@ export const SignModal: React.FC<SignModalProps> = ({
   return (
     <Modal isOpen={isOpen} onClose={onClose} titleId="sign-modal-title">
       <div className="modal-header">
-        <h3 id="sign-modal-title" style={{ fontSize: '1.1rem', fontWeight: 700 }}>
-          Sign Agreement
-        </h3>
-        <button
-          onClick={onClose}
-          aria-label="Close"
-          style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '1.2rem' }}
-        >
-          &times;
+        <h2 id="sign-modal-title" className="modal-title">Sign agreement</h2>
+        <button type="button" className="icon-btn" onClick={onClose} aria-label="Close">
+          <X size={18} strokeWidth={1.75} aria-hidden="true" />
         </button>
       </div>
 
       <div className="modal-body">
-        <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-          This creates an asymmetric-key signature for <strong>{signerName}</strong> over this document's current
-          digest. A fresh ECDSA P-256 keypair is generated for the signature; the private key is used once and never
-          stored.
+        <p className="form-note">
+          This signs the document hash for <strong>{signerName}</strong>. A new ECDSA P-256 key pair is generated for
+          the signature. The private key signs once and is not stored; only the public key is kept for verification.
         </p>
-
-        <div style={{ background: 'var(--bg-secondary)', padding: '0.9rem', borderRadius: '8px', display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
-          <span style={{ fontSize: '0.75rem', textTransform: 'uppercase', color: 'var(--text-muted)', fontWeight: 600 }}>
-            Canonical SHA-256 Document Digest
-          </span>
-          <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.78rem', color: 'var(--color-cyan)', wordBreak: 'break-all' }}>
-            {contentHash}
-          </span>
-        </div>
-
+        <dl className="kv kv-wide">
+          <dt>SHA-256 of title and text</dt>
+          <dd className="mono hash-full">{contentHash}</dd>
+        </dl>
         {error && (
-          <div role="alert" style={{ color: 'var(--color-crimson)', fontSize: '0.85rem' }}>
-            &times; {error}
-          </div>
+          <p role="alert" className="form-error">
+            {error}
+          </p>
         )}
       </div>
 
       <div className="modal-footer">
-        <button className="btn btn-secondary" onClick={onClose} disabled={loading}>
+        <button type="button" className="btn btn-secondary" onClick={onClose} disabled={loading}>
           Cancel
         </button>
-        <button className="btn btn-primary" onClick={handleSign} disabled={loading}>
-          {loading ? 'Signing...' : 'Confirm & Sign'}
+        <button type="button" className="btn btn-primary" onClick={handleSign} disabled={loading}>
+          {loading ? 'Signing' : 'Sign with a new key'}
         </button>
       </div>
     </Modal>

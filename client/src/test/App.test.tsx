@@ -1,13 +1,15 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import App from '../App.js';
+import type { VerificationResult } from '../../../shared/types.js';
 
 const mockDoc = {
   id: 'doc_test123',
   title: 'Consulting Services Agreement',
   content: 'The Consultant agrees to provide security architecture advice.',
   contentHash: 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
-  status: 'PENDING_SIGNATURES' as const,
+  status: 'PARTIALLY_SIGNED' as const,
   createdAt: '2026-09-10T12:00:00Z',
   updatedAt: '2026-09-10T12:00:00Z',
   signers: [
@@ -56,121 +58,194 @@ const mockVerification = {
       email: 'oliver@client.ee',
       hasSigned: true,
       isSignatureValid: true,
+      keyFingerprint: '0123456789abcdef0123456789abcdef',
     },
   ],
   verifiedAt: '2026-09-10T12:35:00Z',
 };
 
-describe('DocuTrust Client Dashboard Component', () => {
+describe('DocuTrust dashboard', () => {
+  let fetchMock: ReturnType<typeof vi.fn>;
+  let verification: VerificationResult;
+
   beforeEach(() => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn((url: string) => {
-        if (url.includes('/api/documents/doc_test123/verify')) {
-          return Promise.resolve({
-            json: () => Promise.resolve({ success: true, data: mockVerification }),
-          });
-        }
-        if (url.includes('/api/documents/doc_test123')) {
-          return Promise.resolve({
-            json: () => Promise.resolve({ success: true, data: mockDoc }),
-          });
-        }
-        if (url.includes('/api/documents')) {
-          return Promise.resolve({
-            json: () => Promise.resolve({ success: true, data: [mockDoc] }),
-          });
-        }
-        if (url.includes('/api/health')) {
-          return Promise.resolve({
-            json: () => Promise.resolve({ status: 'healthy', service: 'docutrust-engine' }),
-          });
-        }
-        return Promise.resolve({
-          json: () => Promise.resolve({ success: true, data: {} }),
-        });
-      })
-    );
+    verification = mockVerification;
+    fetchMock = vi.fn((url: string, init?: RequestInit) => {
+      const respond = (data: unknown) =>
+        Promise.resolve({ json: () => Promise.resolve({ success: true, data }) });
+      if (url.includes('/verify')) return respond(verification);
+      if (url.includes('/sign') && init?.method === 'POST') return respond(mockDoc);
+      if (url.includes('/tamper') && init?.method === 'POST') return respond(mockDoc);
+      if (url.includes('/api/documents/doc_test123')) return respond(mockDoc);
+      if (url.includes('/api/documents') && init?.method === 'POST') return respond(mockDoc);
+      if (url.includes('/api/documents')) return respond([mockDoc]);
+      return respond({});
+    });
+    vi.stubGlobal('fetch', fetchMock);
   });
 
-  /** Waits for the create/list/verify fetch chain to settle so later tests do not see stray state updates. */
+  /** Waits for the list, detail and verify fetch chain to settle so later steps see stable state. */
   async function renderAndSettle() {
     render(<App />);
-    await screen.findByText('All Signatures Valid & Seal Intact');
+    await screen.findByText(/Seal intact/);
   }
 
-  it('renders the application brand heading and create button', async () => {
+  const postsTo = (suffix: string) =>
+    fetchMock.mock.calls.filter(([url, init]) => String(url).endsWith(suffix) && init?.method === 'POST');
+
+  it('renders the brand heading, the subtitle and the primary action', async () => {
     await renderAndSettle();
 
-    expect(screen.getByRole('heading', { name: 'DocuTrust' })).toBeInTheDocument();
-    expect(screen.getByText('Asymmetric Digital Signatures & Tamper Detection')).toBeInTheDocument();
-    expect(screen.getByText('New Agreement')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 1, name: 'DocuTrust' })).toBeInTheDocument();
+    expect(screen.getByText(/ECDSA keys and checked for edits/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'New agreement' })).toBeInTheDocument();
   });
 
-  it('displays the document list and agreement view', async () => {
+  it('summarizes the loaded agreements in one stats strip', async () => {
     await renderAndSettle();
 
-    expect(screen.getAllByText('Consulting Services Agreement').length).toBeGreaterThanOrEqual(1);
-    expect(screen.getByText(/The Consultant agrees to provide security architecture advice/i)).toBeInTheDocument();
-    expect(screen.getAllByText('Liis Tamm').length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText('Signatures collected').parentElement).toHaveTextContent('1 / 2');
+    expect(screen.getByText('Waiting on signers').parentElement).toHaveTextContent('1');
+  });
+
+  it('lists agreements in a table with real buttons and shows the selected agreement text', async () => {
+    await renderAndSettle();
+
+    const table = screen.getByRole('table');
+    const row = within(table).getByRole('button', { name: 'Consulting Services Agreement' });
+    expect(row).toHaveAttribute('aria-pressed', 'true');
+    expect(within(table).getByText('Partially signed')).toBeInTheDocument();
+    expect(within(screen.getByRole('region', { name: 'Agreement text' })).getByText(/security architecture advice/)).toBeInTheDocument();
     expect(screen.getAllByText('Oliver Mets').length).toBeGreaterThanOrEqual(1);
   });
 
-  it('selects a document from the list with a real button, so it is reachable by keyboard', async () => {
+  it('opens the create dialog with labeled fields, rejects an empty submit and closes on Escape', async () => {
     await renderAndSettle();
 
-    const listEntry = screen.getByRole('option', { name: /Consulting Services Agreement/ });
-    expect(listEntry.tagName).toBe('BUTTON');
-    expect(listEntry).toHaveAttribute('aria-selected', 'true');
-  });
+    fireEvent.click(screen.getByRole('button', { name: 'New agreement' }));
+    const dialog = screen.getByRole('dialog', { name: 'New agreement' });
+    expect(within(dialog).getByLabelText('Title')).toBeInTheDocument();
+    expect(within(dialog).getByLabelText('Agreement text')).toBeInTheDocument();
+    expect(within(dialog).getByLabelText('Signer 1 full name')).toBeInTheDocument();
+    expect(within(dialog).getByLabelText('Signer 1 email address')).toBeInTheDocument();
 
-  it('opens the Create Agreement modal with labeled fields, and closes it on Escape', async () => {
-    await renderAndSettle();
-
-    fireEvent.click(screen.getByText('New Agreement'));
-
-    expect(screen.getByRole('dialog', { name: 'Draft New Agreement' })).toBeInTheDocument();
-    expect(screen.getByLabelText('Document Title:')).toBeInTheDocument();
-    expect(screen.getByLabelText('Agreement Content / Terms:')).toBeInTheDocument();
-    expect(screen.getByLabelText('Signer 1 full name')).toBeInTheDocument();
-    expect(screen.getByLabelText('Signer 1 email address')).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Create and hash agreement' }));
+    expect(within(dialog).getByRole('alert')).toHaveTextContent('Enter a title and the agreement text.');
+    expect(postsTo('/api/documents')).toHaveLength(0);
 
     fireEvent.keyDown(document, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+  });
 
-    await waitFor(() => {
-      expect(screen.queryByRole('dialog', { name: 'Draft New Agreement' })).not.toBeInTheDocument();
+  it('creates an agreement through the API and closes the dialog', async () => {
+    const user = userEvent.setup();
+    await renderAndSettle();
+
+    await user.click(screen.getByRole('button', { name: 'New agreement' }));
+    const dialog = screen.getByRole('dialog', { name: 'New agreement' });
+    await user.type(within(dialog).getByLabelText('Title'), 'NDA');
+    await user.type(within(dialog).getByLabelText('Agreement text'), 'Keep it quiet.');
+    await user.type(within(dialog).getByLabelText('Signer 1 full name'), 'Mari Kask');
+    await user.type(within(dialog).getByLabelText('Signer 1 email address'), 'mari@example.ee');
+    await user.click(within(dialog).getByRole('button', { name: 'Create and hash agreement' }));
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    const [, init] = postsTo('/api/documents')[0];
+    expect(JSON.parse(String(init?.body))).toMatchObject({
+      title: 'NDA',
+      signers: [{ name: 'Mari Kask', email: 'mari@example.ee' }],
     });
   });
 
-  it('opens and closes the sign modal from a signer card', async () => {
+  it('signs as a pending signer after confirming in the dialog', async () => {
     await renderAndSettle();
 
-    fireEvent.click(screen.getByText('Execute Digital Signature'));
+    fireEvent.click(screen.getByRole('button', { name: 'Sign as Liis Tamm' }));
+    const dialog = screen.getByRole('dialog', { name: 'Sign agreement' });
+    expect(within(dialog).getByText(mockDoc.contentHash)).toBeInTheDocument();
 
-    expect(screen.getByRole('dialog', { name: 'Sign Agreement' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Confirm & Sign' })).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Sign with a new key' }));
 
-    fireEvent.click(screen.getByText('Cancel'));
-
-    await waitFor(() => {
-      expect(screen.queryByRole('dialog', { name: 'Sign Agreement' })).not.toBeInTheDocument();
-    });
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    const [, init] = postsTo('/api/documents/doc_test123/sign')[0];
+    expect(JSON.parse(String(init?.body))).toMatchObject({ signerId: 'sig_1' });
   });
 
-  it('opens the tamper simulator with the current title and content prefilled', async () => {
+  it('cancels the sign dialog without calling the API', async () => {
     await renderAndSettle();
 
-    fireEvent.click(screen.getByText('Simulate Tampering'));
+    fireEvent.click(screen.getByRole('button', { name: 'Sign as Liis Tamm' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
 
-    const dialog = screen.getByRole('dialog', { name: 'Tamper Detection Simulator' });
-    expect(dialog).toBeInTheDocument();
-    expect(screen.getByLabelText('Title:')).toHaveValue('Consulting Services Agreement');
-    expect(screen.getByText('+ Inject Malicious Clause')).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(postsTo('/api/documents/doc_test123/sign')).toHaveLength(0);
+  });
 
-    fireEvent.click(screen.getByText('Cancel'));
+  it('shows the tamper tester beside the result, prefilled with the current title', async () => {
+    await renderAndSettle();
 
-    await waitFor(() => {
-      expect(screen.queryByRole('dialog', { name: 'Tamper Detection Simulator' })).not.toBeInTheDocument();
-    });
+    expect(screen.getByRole('heading', { name: 'Tamper tester' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Verification result' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Title')).toHaveValue('Consulting Services Agreement');
+    expect(screen.getByText('Signature valid')).toBeInTheDocument();
+  });
+
+  it('refuses to write an unchanged document', async () => {
+    await renderAndSettle();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Write edit without re-signing' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Change the title or the content first.');
+    expect(postsTo('/api/documents/doc_test123/tamper')).toHaveLength(0);
+  });
+
+  it('writes a title edit, re-verifies, and reports a broken seal', async () => {
+    const user = userEvent.setup();
+    await renderAndSettle();
+
+    verification = {
+      ...mockVerification,
+      isValid: false,
+      isTampered: true,
+      currentHash: 'aa'.repeat(32),
+      signerVerifications: [
+        { ...mockVerification.signerVerifications[0], isSignatureValid: false, error: 'Hash mismatch' },
+      ],
+    };
+
+    const title = screen.getByLabelText('Title');
+    await user.clear(title);
+    await user.type(title, 'Consulting Services Agreement v2');
+    await user.click(screen.getByRole('button', { name: 'Write edit without re-signing' }));
+
+    await screen.findByText(/Seal broken/);
+    const [, init] = postsTo('/api/documents/doc_test123/tamper')[0];
+    expect(JSON.parse(String(init?.body))).toEqual({ tamperedTitle: 'Consulting Services Agreement v2' });
+    expect(screen.getByText('Signature fails')).toBeInTheDocument();
+  });
+
+  it('appends an altered clause to the tamper text with the helper button', async () => {
+    await renderAndSettle();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Append altered clause' }));
+
+    expect((screen.getByLabelText('Text') as HTMLTextAreaElement).value).toContain('Added after signing');
+  });
+
+  it('shows the audit trail and the full hashes in the result', async () => {
+    await renderAndSettle();
+
+    expect(screen.getByText('DOCUMENT_CREATED')).toBeInTheDocument();
+    expect(screen.getAllByText(mockVerification.expectedHash).length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('shows an alert when the agreements cannot be loaded', async () => {
+    fetchMock.mockImplementation(() =>
+      Promise.resolve({ json: () => Promise.resolve({ success: false, error: 'Database unavailable' }) })
+    );
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    render(<App />);
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Database unavailable');
   });
 });

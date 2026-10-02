@@ -5,13 +5,14 @@ import {
   fetchDocuments,
   fetchDocumentById,
   verifyDocument,
-} from './services/api.js';
+} from './services/index.js';
 import { Header } from './components/Header.js';
 import { DocumentList } from './components/DocumentList.js';
 import { DocumentViewer } from './components/DocumentViewer.js';
 import { SignModal } from './components/SignModal.js';
 import { CreateDocumentModal } from './components/CreateDocumentModal.js';
-import { TamperSimulatorModal } from './components/TamperSimulatorModal.js';
+import { DemoBanner } from './components/DemoBanner.js';
+import { StatsBar } from './components/StatsBar.js';
 
 export const App: React.FC = () => {
   const [documents, setDocuments] = useState<DocumentRecord[]>([]);
@@ -21,17 +22,19 @@ export const App: React.FC = () => {
 
   const [loading, setLoading] = useState(false);
   const [verifying, setVerifying] = useState(false);
+  const [version, setVersion] = useState(0);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   // Modals
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [isSignOpen, setIsSignOpen] = useState(false);
-  const [isTamperOpen, setIsTamperOpen] = useState(false);
   const [signingSignerId, setSigningSignerId] = useState<string | null>(null);
 
   // Load document list
   const loadDocuments = useCallback(async () => {
     try {
       setLoading(true);
+      setLoadError(null);
       const docs = await fetchDocuments();
       setDocuments(docs);
       if (docs.length > 0 && (!selectedDocId || !docs.some((d) => d.id === selectedDocId))) {
@@ -39,6 +42,7 @@ export const App: React.FC = () => {
       }
     } catch (err) {
       console.error('Failed to load documents:', err);
+      setLoadError(err instanceof Error ? err.message : 'Failed to load agreements');
     } finally {
       setLoading(false);
     }
@@ -74,7 +78,7 @@ export const App: React.FC = () => {
     return () => {
       isMounted = false;
     };
-  }, [selectedDocId]);
+  }, [selectedDocId, version]);
 
   const handleManualVerify = async () => {
     if (!selectedDocId) return;
@@ -94,44 +98,44 @@ export const App: React.FC = () => {
     setIsSignOpen(true);
   };
 
-  const handleDocumentUpdated = async () => {
-    if (selectedDocId) {
-      const doc = await fetchDocumentById(selectedDocId);
-      setSelectedDoc(doc);
-      const vResult = await verifyDocument(selectedDocId);
-      setVerification(vResult);
-    }
-    loadDocuments();
+  const handleDocumentUpdated = () => {
+    setVersion((v) => v + 1);
+    void loadDocuments();
   };
 
   const activeSigner = selectedDoc?.signers.find((s) => s.id === signingSignerId);
 
   return (
     <div className="app-container">
-      <Header
-        onOpenCreateModal={() => setIsCreateOpen(true)}
-        onRefresh={loadDocuments}
-        documentCount={documents.length}
-      />
+      <DemoBanner onReset={handleDocumentUpdated} />
+      <Header onOpenCreateModal={() => setIsCreateOpen(true)} onRefresh={loadDocuments} loading={loading} />
 
-      <main className="main-content">
-        <div className="workspace-grid">
+      <main className="app-main">
+        {loadError && (
+          <p role="alert" className="form-error">
+            {loadError}
+          </p>
+        )}
+        <StatsBar documents={documents} />
+
+        <section aria-labelledby="agreements-title">
+          <h2 id="agreements-title" className="section-heading">Agreements</h2>
           <DocumentList
             documents={documents}
             selectedDocId={selectedDocId}
             onSelectDoc={setSelectedDocId}
             loading={loading}
           />
+        </section>
 
-          <DocumentViewer
-            document={selectedDoc}
-            verification={verification}
-            onVerify={handleManualVerify}
-            onOpenSignModal={handleOpenSignModal}
-            onOpenTamperModal={() => setIsTamperOpen(true)}
-            verifying={verifying}
-          />
-        </div>
+        <DocumentViewer
+          document={selectedDoc}
+          verification={verification}
+          onVerify={handleManualVerify}
+          onOpenSignModal={handleOpenSignModal}
+          onTampered={handleDocumentUpdated}
+          verifying={verifying}
+        />
       </main>
 
       <CreateDocumentModal
@@ -153,14 +157,6 @@ export const App: React.FC = () => {
         onSigned={handleDocumentUpdated}
       />
 
-      <TamperSimulatorModal
-        isOpen={isTamperOpen}
-        documentId={selectedDocId || ''}
-        currentTitle={selectedDoc?.title || ''}
-        currentContent={selectedDoc?.content || ''}
-        onClose={() => setIsTamperOpen(false)}
-        onTampered={handleDocumentUpdated}
-      />
     </div>
   );
 };

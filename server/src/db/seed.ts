@@ -15,8 +15,8 @@ export function seedDatabase(db: DatabaseSync): void {
   // 1. Fully completed GDPR Agreement
   const gdprDoc = service.createDocument(
     {
-      title: 'FinTech Cloud Data Processing Agreement (DPA & DORA Compliant)',
-      content: `FINTECH CLOUD DATA PROCESSING ADDENDUM\n\n1. SCOPE AND PURPOSE\nThis Data Processing Agreement ("DPA") governs the processing of personal and financial telemetry in accordance with Regulation (EU) 2016/679 (GDPR) and the Digital Operational Resilience Act (DORA).\n\n2. TECHNICAL AND ORGANIZATIONAL MEASURES\nThe Processor shall maintain end-to-end asymmetric encryption (ECDSA P-256 and AES-GCM-256) for all data at rest and in transit across EU data centers.\n\n3. AUDIT RIGHTS\nThe Controller retains immutable verification rights through cryptographic audit ledgers.\n\nExecuted under Estonian and EU digital signature standards.`,
+      title: 'FinTech Cloud Data Processing Agreement',
+      content: `FINTECH CLOUD DATA PROCESSING ADDENDUM\n\n1. SCOPE AND PURPOSE\nThis Data Processing Agreement ("DPA") governs the processing of personal and financial telemetry in accordance with Regulation (EU) 2016/679 (GDPR) and the Digital Operational Resilience Act (DORA).\n\n2. TECHNICAL AND ORGANIZATIONAL MEASURES\nThe Processor shall maintain end-to-end asymmetric encryption (ECDSA P-256 and AES-GCM-256) for all data at rest and in transit across EU data centers.\n\n3. AUDIT RIGHTS\nThe Controller retains immutable verification rights through cryptographic audit ledgers.\n\nSigned with ECDSA P-256 keys.`,
       signers: [
         {
           name: 'Elena Rostova',
