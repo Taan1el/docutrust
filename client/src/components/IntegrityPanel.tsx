@@ -68,7 +68,7 @@ export const IntegrityPanel: React.FC<IntegrityPanelProps> = ({ document, verifi
             <label className="field-label" htmlFor="tamper-content-input">Text</label>
             <textarea
               id="tamper-content-input"
-              rows={6}
+              rows={8}
               className="mono"
               value={content}
               onChange={(e) => setContent(e.target.value)}

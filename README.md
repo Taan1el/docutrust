@@ -1,149 +1,165 @@
-# DocuTrust 🔏📜
-> **Cryptographic Document Signing, PKI Digital Signatures & Tamper Verification Engine**  
-> *Engineered for High-Assurance e-ID Workflows, Asymmetric Key Cryptography (ECDSA/RSA) & Immutable Audit Trails*
+# DocuTrust
 
-[![CI Pipeline](https://img.shields.io/badge/CI-Passing-10b981.svg?style=flat-square)](#)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.8-3178c6.svg?style=flat-square)](#)
-[![Node.js](https://img.shields.io/badge/Node.js-24-339933.svg?style=flat-square)](#)
-[![Database](https://img.shields.io/badge/Database-SQLite%20WAL%20(Native)-003B57.svg?style=flat-square)](#)
-[![React](https://img.shields.io/badge/React-19-61dafb.svg?style=flat-square)](#)
-[![Cryptography](https://img.shields.io/badge/Cryptography-ECDSA%20P--256%20%2F%20SHA--256-10b981.svg?style=flat-square)](#)
-[![Docker](https://img.shields.io/badge/Docker-Compose%20Ready-2496ed.svg?style=flat-square)](#)
+DocuTrust is a multi-party agreement signer. Each signer signs a SHA-256 hash of the agreement's title and text with an ECDSA P-256 key, and the app re-computes that hash on demand to show whether the stored text still matches what was signed. It has an Express API with SQLite storage and a React dashboard for creating agreements, signing them, verifying them and testing what an after-the-fact edit looks like.
 
----
+[![CI](https://github.com/Taan1el/docutrust/actions/workflows/ci.yml/badge.svg)](https://github.com/Taan1el/docutrust/actions/workflows/ci.yml)
+[![Pages](https://github.com/Taan1el/docutrust/actions/workflows/pages.yml/badge.svg)](https://github.com/Taan1el/docutrust/actions/workflows/pages.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-## ⚡ 2-Minute Overview
-**DocuTrust** is an enterprise-grade digital signature and legal contract sealing platform modeled after the European and Estonian digital identity ecosystem (Smart-ID, e-Residency, DigiDoc, and EU Regulation 910/2014 eIDAS). Built with native asymmetric cryptography, it enables multi-party digital signing ceremonies, canonical SHA-256 document hashing, mathematical public key verification (`crypto.verify`), and real-time cryptographic tamper detection.
+**Live demo:** https://taan1el.github.io/docutrust/
 
-### Core Capabilities
-1. **Asymmetric Public-Key Cryptography (PKI)**: Utilizes native `node:crypto` Elliptic Curve Digital Signatures (ECDSA P-256 / secp256r1) and RSA-PSS 2048-bit keypairs. Public keys are fingerprint-indexed and signatures are verified mathematically without third-party SaaS reliance.
-2. **Canonical SHA-256 Document Hashing**: Content is standardized across line endings (`\r\n` vs `\n`) and hashed into an immutable 256-bit digest prior to signing, preventing platform-specific hashing discrepancies.
-3. **Multi-Party Signing Finite State Machine**: Manages contract lifecycle transitions (`DRAFT` &rarr; `PENDING_SIGNATURES` &rarr; `PARTIALLY_SIGNED` &rarr; `COMPLETED` / `SEALED`) with designated signer roles and verification certificates.
-4. **Instant Tamper Detection & Seal Breach**: The verification engine re-hashes the agreement content dynamically. If a single character is altered after signing, the cryptographic seal breaks instantly, alerting users with a glowing red tamper banner.
-5. **Interactive Tamper Testing Sandbox**: Built-in evaluation tool allowing users to inject modified contract terms and witness instant mathematical signature invalidation.
-6. **Immutable Cryptographic Audit Trail**: Chronologically records all actions (`DOCUMENT_CREATED`, `DOCUMENT_SIGNED`, `DOCUMENT_SEALED`, `VERIFICATION_PERFORMED`, `TAMPER_DETECTED`) with timestamps, IP addresses, and user-agent metadata.
+The demo runs entirely in your browser. The same canonical hashing and validation code the server uses runs against Web Crypto and a localStorage-backed store, so it needs no backend. Sample agreements are the same on every reset.
 
----
+## Screenshots
 
-## 🏛️ System Architecture
+![Dashboard with the stats strip and the agreements table](docs/screenshots/01-dashboard.png)
 
-```mermaid
-graph TD
-    subgraph Client ["Frontend (React 19 + TypeScript + Vite)"]
-        UI[DocuTrust Operations Console]
-        DocList[Agreement Explorer]
-        Viewer[Document Parchment Viewer]
-        Stamps[Digital Signature Stamp Cards]
-        SignMod[Signing Ceremony Modal]
-        TamperMod[Tamper Detection Sandbox]
-        CreateMod[New Agreement Modal]
+More screenshots: [an agreement with its signers](docs/screenshots/02-agreement.png), [the tamper tester beside a broken-seal result](docs/screenshots/03-tamper.png), [the dashboard at phone width](docs/screenshots/04-mobile.png).
 
-        UI --> DocList
-        UI --> Viewer
-        Viewer --> Stamps
-        UI --> SignMod
-        UI --> TamperMod
-        UI --> CreateMod
-    end
+## What it is for
 
-    subgraph Server ["Backend (Node.js 24 + Express + Native SQLite WAL)"]
-        API[Express REST Gateway /api]
-        SigningSvc[Signing & Lifecycle Service]
-        CryptoSvc[Native Crypto & PKI Engine]
-        DocRepo[Document & Signer Repository]
+Teams that need several people to approve a document and want a record of who signed which exact text. Anyone who needs to see how hash-and-sign tamper detection behaves can edit a signed agreement in the tamper tester and watch every signature fail.
 
-        API --> SigningSvc
-        SigningSvc --> CryptoSvc
-        SigningSvc --> DocRepo
-    end
+## Features
 
-    subgraph Storage ["Relational Storage"]
-        DB[(SQLite WAL Database)]
-        D[documents]
-        S[signers (Public Keys & Signatures)]
-        A[audit_events (Immutable Trail)]
+- Create an agreement with a title, text and one or more signers (name, email, role).
+- Sign as each pending signer. Every signature uses a fresh ECDSA P-256 key pair; the private key is used once and not stored.
+- Verify an agreement at any time. Verification re-hashes the current title and text and checks each stored signature against that hash.
+- Tamper tester: writes a new title or text straight into storage without re-signing, then re-verifies.
+- Audit trail of creation, signing, verification and tamper events, with truncated hashes and the full value on hover.
+- Agreements table, stats strip and signer list with key fingerprints and signature values.
+- Static demo build for GitHub Pages with sample data and a reset control.
 
-        DocRepo --> D
-        DocRepo --> S
-        DocRepo --> A
-    end
-
-    UI <-->|REST API /api/documents| API
-```
-
----
-
-## 🚀 Quick Start (Zero-Config)
+## Getting started
 
 ### Prerequisites
-- Node.js 24+ (uses native `node:sqlite` and `node:crypto`)
-- npm 10+
 
-### Local Development
+- Node.js 22.5 or newer (the server uses the built-in `node:sqlite` module). Docker is optional.
+
+### Install
+
 ```bash
-# 1. Clone repository
 git clone https://github.com/Taan1el/docutrust.git
 cd docutrust
-
-# 2. Install workspace dependencies
 npm install
+```
 
-# 3. Start backend API and frontend Vite dev server concurrently
+### Run
+
+```bash
 npm run dev
-
-# Backend runs at:  http://localhost:4000
-# Frontend runs at: http://localhost:5173
 ```
 
-### Running Automated Tests
-```bash
-# Run all unit and integration tests (15 passing across server and client)
-npm test
+The API listens on http://127.0.0.1:4000 and the Vite dev server on http://localhost:5173, which proxies `/api` to the API. The first start seeds three sample agreements into an empty database.
 
-# Run TypeScript type-checks and linting across workspaces
-npm run lint
+For a production-style run: `npm run build`, then `npm start --workspace=server`. The server also serves the built client from `client/dist`.
 
-# Build production bundles
-npm run build
-```
+### Environment variables
 
-### Docker Deployment
-```bash
-# Spin up production container with persistent SQLite volume
-docker compose up --build
-# Open http://localhost:4000 in your browser
-```
+Server (see `server/.env.example`; nothing loads the file automatically, so export the values or use `node --env-file`):
 
----
-
-## 📡 REST API Reference
-
-| Method | Endpoint | Description |
+| Variable | Default | Purpose |
 |---|---|---|
-| `GET` | `/api/health` | Healthcheck and cryptographic engine status |
-| `GET` | `/api/documents` | List all agreements with signer status summaries |
-| `POST` | `/api/documents` | Create and hash a new multi-party agreement |
-| `GET` | `/api/documents/:id` | Retrieve agreement details, signers, and audit trail |
-| `POST` | `/api/documents/:id/sign` | Execute digital signature for a designated signer |
-| `GET` | `/api/documents/:id/verify` | Re-hash and mathematically verify all signatures |
-| `POST` | `/api/documents/:id/tamper` | Simulate unauthorized content modification |
-| `GET` | `/api/crypto/keypair` | Generate on-demand ECDSA / RSA asymmetric keypair bundle |
+| `PORT` | `4000` | Port the API listens on |
+| `HOST` | `127.0.0.1` | Interface to bind. The API has no authentication, so it stays on loopback unless changed |
+| `DOCUTRUST_DB_PATH` | `server/data/docutrust.db` | SQLite file location |
 
----
+Client (see `client/.env.example`):
 
-## 📐 Architecture Decision Records (ADRs)
+| Variable | Default | Purpose |
+|---|---|---|
+| `VITE_API_TARGET` | `http://127.0.0.1:4000` | Where the Vite dev server proxies `/api` |
 
-Detailed architectural rationale:
-- [ADR 001: Native SQLite WAL and Relational Contract Persistence](docs/adr/001-native-sqlite-wal-and-relational-contract-persistence.md)
-- [ADR 002: Asymmetric Key Cryptography and Canonical Document Hashing](docs/adr/002-asymmetric-key-cryptography-and-canonical-document-hashing.md)
-- [ADR 003: Mathematical Signature Verification and Tamper Detection](docs/adr/003-mathematical-signature-verification-and-tamper-detection.md)
+## Scripts
 
----
+| Script | What it does |
+|---|---|
+| `npm run dev` | API with file watching plus the Vite dev server |
+| `npm run build` | Compile the server and build the client into `client/dist` |
+| `npm run build:pages` | Build the static demo into `client/dist-pages`, with base path `/docutrust/` |
+| `npm run lint` | Type-check server and client |
+| `npm test` | Run server and client tests |
 
-## 🧪 Verification & Quality Checklist
+## How it works
 
-- [x] **15 Automated Tests Passing** (10 backend cryptographic integration + 5 frontend component tests).
-- [x] **Zero External Cryptographic Dependencies**: Powered entirely by Node.js native `node:crypto` (ECDSA P-256 & SHA-256).
-- [x] **Relational Schema Integrity**: Native SQLite with WAL mode, foreign keys, and indexes.
-- [x] **Full TypeScript Strict Compliance**: End-to-end type safety sharing `shared/types.ts` between client and server.
-- [x] **Multi-Stage Docker & Compose**: Production container with health check and persistent data volume.
+1. **Canonical text.** `shared/canonical.ts` normalizes line endings to `\n`, trims the title and text, and JSON-encodes the pair `{title, content}`. Encoding both fields means a changed title is caught like a changed clause, and `("AB","C")` cannot collide with `("A","BC")`.
+2. **Hash.** The document hash is SHA-256 of that string, stored as 64 hex characters when the agreement is created.
+3. **Signature.** To sign, the server (or the browser in the demo) generates an ECDSA P-256 key pair and signs the hex hash string with SHA-256. It stores the signature, the public key (PEM), a key fingerprint (first 32 hex characters of the SHA-256 of the public key's DER bytes), the time and the requester's address and user agent. The crypto service can also sign and verify RSA-PSS keys passed through the API; the dashboard never uses them.
+4. **Verification.** `GET /api/documents/:id/verify` re-hashes the stored title and text. If the hash differs from the stored one, the document is reported as tampered and every signature fails. Otherwise each signature is checked against the stored hash with that signer's public key.
+
+What this covers: a change to the stored title or text after signing is detected, as long as the stored hash and signatures were not rewritten along with it. What it does not cover: the app does not verify who a signer is. Anyone who can call the sign endpoint for a pending signer produces a valid signature, and the private key is generated by the server for that request. Someone with write access to the database can replace the text, hash, public keys and signatures together and the result would verify. The audit trail and the recorded client address are plain database rows, and the address comes from the `x-forwarded-for` header when present, so it can be spoofed. This is a demonstration of the mechanism, not an electronic-signature service, and it makes no claim of legal validity.
+
+### Project layout
+
+```
+client/            React dashboard (Vite)
+  src/components/    table, detail view, integrity panel, dialogs
+  src/services/      API client, demo adapter, Web Crypto helpers
+  src/styles/        design tokens
+shared/            Code used by both server and demo: canonical text, validation, errors, types
+server/
+  src/               Express app, routes, controllers, signing and crypto services, SQLite repository
+  test/              API, crypto and validation tests
+docs/adr/          Decision records
+docs/screenshots/  README images
+```
+
+## API reference
+
+All responses are `{ "success": boolean, "data"?: ..., "error"?: string }`.
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/api/health` | Service status |
+| GET | `/api/documents` | List agreements with signers |
+| POST | `/api/documents` | Create an agreement. Body: `title`, `content`, `signers[]` |
+| GET | `/api/documents/:id` | One agreement with its audit trail |
+| POST | `/api/documents/:id/sign` | Sign as a signer. Body: `signerId` |
+| GET | `/api/documents/:id/verify` | Re-hash and verify every signature |
+| POST | `/api/documents/:id/tamper` | Overwrite title and/or text without re-signing. Body: `tamperedTitle`, `tamperedContent` |
+| GET | `/api/crypto/keypair` | Generate a key pair (`?algorithm=` ECDSA_P256_SHA256 or RSA_PSS_SHA256) |
+
+Invalid input returns 400, unknown ids 404, a repeated signature 409, and non-JSON bodies 415. Unexpected errors return a generic 500 message without internal detail.
+
+`/api/documents/:id/tamper` and `/api/crypto/keypair` return key material and rewrite data, and the API has no authentication. Keep it on loopback or behind your own access control.
+
+## Testing
+
+```bash
+npm test
+```
+
+Server tests (Vitest and Supertest) cover key generation, canonical hashing, sign and verify for both key types, the full create, sign and verify flow, tamper detection on title and text, validation limits and error responses, all against an in-memory database. Client tests (React Testing Library) cover the table, create and sign dialogs, the tamper tester and the verification result, plus the demo data layer and Web Crypto helpers. No test uses real timers or sleeps.
+
+## Deployment
+
+### Docker
+
+```bash
+docker compose up --build
+```
+
+The image builds both workspaces, runs as the unprivileged `node` user and serves the API and the built client on port 4000. The compose file publishes the port on 127.0.0.1 only and keeps the SQLite file in a named volume.
+
+### GitHub Pages
+
+`.github/workflows/pages.yml` builds the demo with `npm run build:pages` on every push to `main` and deploys it when the repository is public.
+
+## Design notes and limitations
+
+- SQLite through `node:sqlite` in WAL mode keeps the server dependency-free apart from Express. The module needs Node 22.5 or newer.
+- The demo signs with Web Crypto, which encodes ECDSA signatures as raw r and s values rather than the DER form Node produces. Demo data and server data are not interchangeable.
+- Demo agreements live in localStorage for one browser. Private browsing falls back to memory for the page view.
+- One database, no accounts, no authentication, no email delivery to signers.
+- No performance measurements have been taken, so none are claimed.
+
+## Roadmap
+
+- Signer authentication so a signature can only be made by the invited person.
+- Client-side key generation so the server never holds a private key.
+- Signature timestamps from an external time source.
+- Export of an agreement with its signatures and public keys for verification outside the app.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
