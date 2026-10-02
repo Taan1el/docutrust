@@ -116,26 +116,27 @@ export const App: React.FC = () => {
             {loadError}
           </p>
         )}
-        <StatsBar documents={documents} />
+        <div className="workspace">
+          <aside className="shelf" aria-labelledby="agreements-title">
+            <h2 id="agreements-title" className="panel-heading">Agreements</h2>
+            <StatsBar documents={documents} />
+            <DocumentList
+              documents={documents}
+              selectedDocId={selectedDocId}
+              onSelectDoc={setSelectedDocId}
+              loading={loading}
+            />
+          </aside>
 
-        <section aria-labelledby="agreements-title">
-          <h2 id="agreements-title" className="section-heading">Agreements</h2>
-          <DocumentList
-            documents={documents}
-            selectedDocId={selectedDocId}
-            onSelectDoc={setSelectedDocId}
-            loading={loading}
+          <DocumentViewer
+            document={selectedDoc}
+            verification={verification}
+            onVerify={handleManualVerify}
+            onOpenSignModal={handleOpenSignModal}
+            onTampered={handleDocumentUpdated}
+            verifying={verifying}
           />
-        </section>
-
-        <DocumentViewer
-          document={selectedDoc}
-          verification={verification}
-          onVerify={handleManualVerify}
-          onOpenSignModal={handleOpenSignModal}
-          onTampered={handleDocumentUpdated}
-          verifying={verifying}
-        />
+        </div>
       </main>
 
       <CreateDocumentModal

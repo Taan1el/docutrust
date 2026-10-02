@@ -101,17 +101,18 @@ describe('DocuTrust dashboard', () => {
     expect(screen.getByRole('button', { name: 'New agreement' })).toBeInTheDocument();
   });
 
-  it('summarizes the loaded agreements in one stats strip', async () => {
+  it('summarizes the loaded agreements in a one-line tally with a signature meter', async () => {
     await renderAndSettle();
 
-    expect(screen.getByText('Signatures collected').parentElement).toHaveTextContent('1 / 2');
-    expect(screen.getByText('Waiting on signers').parentElement).toHaveTextContent('1');
+    expect(screen.getByText('1 agreement, 0 fully signed, 1 waiting on signers')).toBeInTheDocument();
+    expect(screen.getByRole('meter', { name: 'Signatures collected' })).toHaveAttribute('aria-valuenow', '1');
+    expect(screen.getByRole('meter', { name: 'Signatures collected' }).parentElement).toHaveTextContent('1 / 2');
   });
 
-  it('lists agreements in a table with real buttons and shows the selected agreement text', async () => {
+  it('lists agreements with real buttons and shows the selected agreement text', async () => {
     await renderAndSettle();
 
-    const table = screen.getByRole('table');
+    const table = screen.getByRole('complementary', { name: 'Agreements' });
     const row = within(table).getByRole('button', { name: 'Consulting Services Agreement' });
     expect(row).toHaveAttribute('aria-pressed', 'true');
     expect(within(table).getByText('Partially signed')).toBeInTheDocument();

@@ -1,19 +1,22 @@
 import React, { useState } from 'react';
-import type { DocumentRecord, VerificationResult } from '../../../shared/types.js';
+import type { DocumentRecord, VerificationResult as VerificationData } from '../../../shared/types.js';
 import { simulateTamper } from '../services/index.js';
 
 // The parent keys this component on the document's id, title and text, so the
 // form fields start from the stored values again after every edit or selection change.
-interface IntegrityPanelProps {
+interface TamperTesterProps {
   document: DocumentRecord;
-  verification: VerificationResult | null;
   onTampered: () => void;
+}
+
+interface VerificationResultProps {
+  verification: VerificationData | null;
 }
 
 const SAMPLE_CLAUSE =
   '\n\nAdded after signing: payment amounts and intellectual property terms are changed without signer consent.';
 
-export const IntegrityPanel: React.FC<IntegrityPanelProps> = ({ document, verification, onTampered }) => {
+export const TamperTester: React.FC<TamperTesterProps> = ({ document, onTampered }) => {
   const [title, setTitle] = useState(document.title);
   const [content, setContent] = useState(document.content);
   const [loading, setLoading] = useState(false);
@@ -41,13 +44,8 @@ export const IntegrityPanel: React.FC<IntegrityPanelProps> = ({ document, verifi
     }
   };
 
-  const tampered = verification?.isTampered === true;
-  const intact = verification !== null && !tampered && verification.isValid;
-
   return (
-    <div className="integrity">
-      <h3 className="panel-heading integrity-heading">Integrity check</h3>
-      <div className="integrity-grid">
+    <section className="tester" aria-labelledby="tester-title">
         <form
           className="tamper-form"
           onSubmit={(e) => {
@@ -55,7 +53,7 @@ export const IntegrityPanel: React.FC<IntegrityPanelProps> = ({ document, verifi
             void handleTamper();
           }}
         >
-          <h4 className="sub-heading">Tamper tester</h4>
+          <h3 id="tester-title" className="panel-heading">Tamper tester</h3>
           <p className="form-note">
             Writes a new title or text straight into storage without re-signing, like an unauthorized edit would.
             Verification then shows which checks fail.
@@ -88,9 +86,17 @@ export const IntegrityPanel: React.FC<IntegrityPanelProps> = ({ document, verifi
             </button>
           </div>
         </form>
+    </section>
+  );
+};
 
+export const VerificationResult: React.FC<VerificationResultProps> = ({ verification }) => {
+  const tampered = verification?.isTampered === true;
+  const intact = verification !== null && !tampered && verification.isValid;
+
+  return (
         <div className="result" aria-live="polite">
-          <h4 className="sub-heading">Verification result</h4>
+          <h3 className="panel-heading">Verification result</h3>
           {!verification && <p className="empty-note">Verifying.</p>}
           {verification && (
             <>
@@ -133,7 +139,5 @@ export const IntegrityPanel: React.FC<IntegrityPanelProps> = ({ document, verifi
             </>
           )}
         </div>
-      </div>
-    </div>
   );
 };
