@@ -387,7 +387,7 @@ textarea {
 .sheet-text {
   font-family: var(--font-heading);
   font-size: 19px;
-  line-height: 1.7;
+  line-height: 1.55;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }

@@ -12,9 +12,9 @@ The demo runs entirely in your browser. The same canonical hashing and validatio
 
 ## Screenshots
 
-![Dashboard with the stats strip and the agreements table](docs/screenshots/01-dashboard.png)
+![An agreement open as a white sheet on a parchment desk, with a slim agreements list on the left and signature blocks in the right margin](docs/screenshots/01-dashboard.png)
 
-More screenshots: [an agreement with its signers](docs/screenshots/02-agreement.png), [the tamper tester beside a broken-seal result](docs/screenshots/03-tamper.png), [the dashboard at phone width](docs/screenshots/04-mobile.png).
+More screenshots: [the full page with the tamper tester and audit trail under the sheet](docs/screenshots/02-agreement.png), [a broken-seal result after an edit without re-signing](docs/screenshots/03-tamper.png), [the dashboard at phone width](docs/screenshots/04-mobile.png).
 
 ## What it is for
 
@@ -27,7 +27,7 @@ Teams that need several people to approve a document and want a record of who si
 - Verify an agreement at any time. Verification re-hashes the current title and text and checks each stored signature against that hash.
 - Tamper tester: writes a new title or text straight into storage without re-signing, then re-verifies.
 - Audit trail of creation, signing, verification and tamper events, with truncated hashes and the full value on hover.
-- Agreements table, stats strip and signer list with key fingerprints and signature values.
+- The open agreement reads as a sheet on a desk: a slim agreements list on the left, signature blocks and the verification result in a margin column on the right, with key fingerprints and signature values in monospace.
 - Static demo build for GitHub Pages with sample data and a reset control.
 
 ## Getting started
@@ -93,7 +93,7 @@ What this covers: a change to the stored title or text after signing is detected
 
 ```
 client/            React dashboard (Vite)
-  src/components/    table, detail view, integrity panel, dialogs
+  src/components/    agreements list, sheet view, tamper tester and result, dialogs
   src/services/      API client, demo adapter, Web Crypto helpers
   src/styles/        design tokens
 shared/            Code used by both server and demo: canonical text, validation, errors, types
@@ -129,7 +129,7 @@ Invalid input returns 400, unknown ids 404, a repeated signature 409, and non-JS
 npm test
 ```
 
-Server tests (Vitest and Supertest) cover key generation, canonical hashing, sign and verify for both key types, the full create, sign and verify flow, tamper detection on title and text, validation limits and error responses, all against an in-memory database. Client tests (React Testing Library) cover the table, create and sign dialogs, the tamper tester and the verification result, plus the demo data layer and Web Crypto helpers. No test uses real timers or sleeps.
+Server tests (Vitest and Supertest) cover key generation, canonical hashing, sign and verify for both key types, the full create, sign and verify flow, tamper detection on title and text, validation limits and error responses, all against an in-memory database. Client tests (React Testing Library) cover the agreements list, create and sign dialogs, the tamper tester and the verification result, plus the demo data layer and Web Crypto helpers. No test uses real timers or sleeps.
 
 ## Deployment
 
