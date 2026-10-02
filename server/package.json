@@ -5,6 +5,15 @@
   "private": true,
   "type": "module",
   "license": "MIT",
+  "homepage": "https://taan1el.github.io/docutrust/",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Taan1el/docutrust.git",
+    "directory": "server"
+  },
+  "bugs": {
+    "url": "https://github.com/Taan1el/docutrust/issues"
+  },
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc",

@@ -10,15 +10,19 @@ jobs:
   test-and-verify:
     name: Build, Lint & Automated Tests
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: [22, 24]
 
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Set up Node.js 24
+      - name: Set up Node.js ${{ matrix.node-version }}
         uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: ${{ matrix.node-version }}
           cache: 'npm'
 
       - name: Install dependencies
@@ -32,3 +36,32 @@ jobs:
 
       - name: Build client and server bundles
         run: npm run build
+
+      - name: Build the static GitHub Pages demo bundle
+        run: npm run build:pages
+
+  docker:
+    name: Docker image
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Build container image
+        run: docker build -t docutrust:ci .
+
+      - name: Start container and check it serves the API and the built client
+        run: |
+          docker run -d --name docutrust -p 127.0.0.1:4000:4000 docutrust:ci
+          for i in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:4000/api/health; then break; fi
+            sleep 1
+          done
+          curl -sf http://127.0.0.1:4000/api/health
+          curl -sf http://127.0.0.1:4000/ | grep -q '<div id="root"></div>'
+          test "$(docker exec docutrust id -u)" != "0"
+
+      - name: Container logs
+        if: always()
+        run: docker logs docutrust || true
