@@ -3,6 +3,7 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import App from '../App.js';
 import { axe } from './axe.js';
+import type { VerificationResult } from '../../../shared/types.js';
 
 const doc = {
   id: 'doc_a11y',
@@ -37,7 +38,7 @@ const baseVerification = {
   verifiedAt: '2026-09-10T12:35:00Z',
 };
 
-let verification = baseVerification;
+let verification: VerificationResult = baseVerification;
 
 describe('accessibility checks', () => {
   beforeEach(() => {
