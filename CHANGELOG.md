@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- Automated accessibility tests for the agreement sheet, the new agreement dialog and the tamper tester, using axe-core with the WCAG 2 A and AA rules. Color contrast is left out of these tests because jsdom cannot compute colors; it is checked separately.
+
 ### Changed
 - New visual identity built around paper and ink: a parchment desk, the open agreement shown as a white sheet in a serif face, and a margin column on the right holding signature blocks and the verification result. Agreements now sit in a slim list on the left, the tamper tester and audit trail sit under the sheet, and hashes and signatures are set in a typewriter face. The overview strip and table are gone; a one-line tally replaces them. Behavior and features are unchanged.
 

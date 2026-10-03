@@ -131,6 +131,8 @@ npm test
 
 Server tests (Vitest and Supertest) cover key generation, canonical hashing, sign and verify for both key types, the full create, sign and verify flow, tamper detection on title and text, validation limits and error responses, all against an in-memory database. Client tests (React Testing Library) cover the agreements list, create and sign dialogs, the tamper tester and the verification result, plus the demo data layer and Web Crypto helpers. No test uses real timers or sleeps.
 
+The client suite also includes automated accessibility checks (axe-core through vitest-axe, WCAG 2 A and AA rules) for the agreement sheet, the new agreement dialog and the tamper tester. jsdom cannot compute colors, so color contrast is checked outside jsdom, from computed values.
+
 ## Deployment
 
 ### Docker
