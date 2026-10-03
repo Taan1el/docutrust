@@ -85,4 +85,23 @@ describe('accessibility checks', () => {
     await screen.findByText(/Seal broken/);
     expect(await axe(container)).toHaveNoViolations();
   });
+
+  it('keeps every scrollable container keyboard reachable and named', async () => {
+    const { container } = await openApp();
+    const check = (root: ParentNode) => {
+      const wrappers = root.querySelectorAll('.sheet-text, .modal-body');
+      expect(wrappers.length).toBeGreaterThan(0);
+      wrappers.forEach((el) => {
+        expect(el.getAttribute('role')).toBe('region');
+        expect(el.getAttribute('tabindex')).toBe('0');
+        expect((el.getAttribute('aria-label') ?? '').trim()).not.toBe('');
+      });
+    };
+    check(container);
+    await userEvent.click(screen.getByRole('button', { name: 'New agreement' }));
+    check(screen.getByRole('dialog', { name: 'New agreement' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Close' }));
+    await userEvent.click(screen.getByRole('button', { name: /^Sign as/ }));
+    check(screen.getByRole('dialog'));
+  });
 });

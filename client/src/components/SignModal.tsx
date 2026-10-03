@@ -50,7 +50,7 @@ export const SignModal: React.FC<SignModalProps> = ({
         </button>
       </div>
 
-      <div className="modal-body">
+      <div className="modal-body" role="region" tabIndex={0} aria-label="Signing details">
         <p className="form-note">
           This signs the document hash for <strong>{signerName}</strong>. A new ECDSA P-256 key pair is generated for
           the signature. The private key signs once and is not stored; only the public key is kept for verification.

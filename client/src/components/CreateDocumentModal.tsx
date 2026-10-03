@@ -67,7 +67,7 @@ export const CreateDocumentModal: React.FC<CreateDocumentModalProps> = ({ isOpen
         </button>
       </div>
 
-      <div className="modal-body">
+      <div className="modal-body" role="region" tabIndex={0} aria-label="Agreement details">
         <div className="field">
           <label className="field-label" htmlFor="doc-title-input">Title</label>
           <input
