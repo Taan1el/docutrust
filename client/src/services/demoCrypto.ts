@@ -1,19 +1,13 @@
+import { p256Sign, p256Verify, webCrypto as subtle } from '../local/p256.js';
+
 // In-browser cryptography for the GitHub Pages demo, using the Web Crypto
 // API instead of node:crypto. It signs with the same algorithm the server
 // uses for every signature its own UI produces (ECDSA, NIST P-256 curve,
-// SHA-256 digest — see server/src/services/crypto.service.ts and
+// SHA-256 digest; see server/src/services/crypto.service.ts and
 // docs/adr/002-asymmetric-key-cryptography-and-canonical-document-hashing.md),
 // and reuses shared/canonical.ts so the demo hashes a document exactly the
 // way the server does. Private keys never leave this module and are never
 // written to storage: a signature is produced once, then the key is dropped.
-
-function subtle(): SubtleCrypto {
-  const api = globalThis.crypto?.subtle;
-  if (!api) {
-    throw new Error('Web Crypto is not available. Open the demo over HTTPS or on localhost.');
-  }
-  return api;
-}
 
 function bufferToHex(buffer: ArrayBuffer): string {
   return [...new Uint8Array(buffer)].map((b) => b.toString(16).padStart(2, '0')).join('');
@@ -52,7 +46,7 @@ export interface DemoKeyPair {
 
 /**
  * SHA-256 fingerprint of the public key's DER bytes, hex-truncated to 32
- * characters — the same computation as the server's
+ * characters, the same computation as the server's
  * CryptoService.computeKeyFingerprint, just over Web Crypto's exported key
  * bytes instead of a decoded PEM string.
  */
@@ -65,7 +59,7 @@ async function fingerprintOf(derBytes: ArrayBuffer): Promise<string> {
 export async function generateKeyPair(): Promise<DemoKeyPair> {
   const { publicKey, privateKey } = await subtle().generateKey(
     { name: 'ECDSA', namedCurve: 'P-256' },
-    true,
+    false,
     ['sign', 'verify']
   );
   const spki = await subtle().exportKey('spki', publicKey);
@@ -82,11 +76,7 @@ export async function hashDocument(canonicalInput: string): Promise<string> {
 
 /** Signs a hex content hash with an ECDSA private key. The key is used once and discarded by the caller. */
 export async function signHash(contentHash: string, privateKey: CryptoKey): Promise<string> {
-  const signature = await subtle().sign(
-    { name: 'ECDSA', hash: 'SHA-256' },
-    privateKey,
-    new TextEncoder().encode(contentHash)
-  );
+  const signature = await p256Sign(privateKey, new TextEncoder().encode(contentHash));
   return bufferToHex(signature);
 }
 
@@ -105,8 +95,7 @@ export async function verifySignature(
       ['verify']
     );
     const signatureBytes = Uint8Array.from(signatureHex.match(/.{2}/g)?.map((b) => parseInt(b, 16)) ?? []);
-    return await subtle().verify(
-      { name: 'ECDSA', hash: 'SHA-256' },
+    return await p256Verify(
       publicKey,
       signatureBytes,
       new TextEncoder().encode(contentHash)
