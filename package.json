@@ -1,6 +1,6 @@
 {
   "name": "docutrust",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Multi-party document signing with ECDSA signatures, canonical hashing and tamper detection",
   "private": true,
   "type": "module",

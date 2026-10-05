@@ -1,6 +1,6 @@
 {
   "name": "@docutrust/server",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "DocuTrust Express API: document signing, asymmetric signature verification and tamper detection",
   "private": true,
   "type": "module",
