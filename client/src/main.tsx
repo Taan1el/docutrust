@@ -7,6 +7,9 @@ import '@fontsource/courier-prime/400.css';
 import '@fontsource/courier-prime/700.css';
 import './styles/tokens.css';
 import App from './App.js';
+import { registerOffline } from './local/offline.js';
+
+registerOffline();
 
 ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
   <React.StrictMode>
