@@ -5,6 +5,7 @@ import {
   fetchDocuments,
   fetchDocumentById,
   verifyDocument,
+  isDemoMode,
 } from './services/index.js';
 import { Header } from './components/Header.js';
 import { DocumentList } from './components/DocumentList.js';
@@ -13,8 +14,13 @@ import { SignModal } from './components/SignModal.js';
 import { CreateDocumentModal } from './components/CreateDocumentModal.js';
 import { DemoBanner } from './components/DemoBanner.js';
 import { StatsBar } from './components/StatsBar.js';
+import { LocalSigning } from './local/LocalSigning.js';
+import { WorkspaceModeControl } from './local/WorkspaceMode.js';
+import type { WorkspaceMode } from './local/workspace.js';
 
 export const App: React.FC = () => {
+  const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>('sample');
+  const ownData = isDemoMode && workspaceMode === 'workspace';
   const [documents, setDocuments] = useState<DocumentRecord[]>([]);
   const [selectedDocId, setSelectedDocId] = useState<string | null>(null);
   const [selectedDoc, setSelectedDoc] = useState<DocumentRecord | null>(null);
@@ -107,10 +113,12 @@ export const App: React.FC = () => {
 
   return (
     <div className="app-container">
-      <DemoBanner onReset={handleDocumentUpdated} />
-      <Header onOpenCreateModal={() => setIsCreateOpen(true)} onRefresh={loadDocuments} loading={loading} />
+      <DemoBanner onReset={handleDocumentUpdated} workspace={ownData} />
+      <Header onOpenCreateModal={() => setIsCreateOpen(true)} onRefresh={loadDocuments} loading={loading} workspace={ownData} />
+      {isDemoMode && <WorkspaceModeControl onChange={setWorkspaceMode} />}
 
       <main className="app-main">
+        {ownData ? <LocalSigning /> : <>
         {loadError && (
           <p role="alert" className="form-error">
             {loadError}
@@ -137,18 +145,19 @@ export const App: React.FC = () => {
             verifying={verifying}
           />
         </div>
+        </>}
       </main>
 
-      <CreateDocumentModal
+      {!ownData && <CreateDocumentModal
         isOpen={isCreateOpen}
         onClose={() => setIsCreateOpen(false)}
         onCreated={(id) => {
           loadDocuments();
           setSelectedDocId(id);
         }}
-      />
+      />}
 
-      <SignModal
+      {!ownData && <SignModal
         isOpen={isSignOpen}
         documentId={selectedDocId || ''}
         signerId={signingSignerId}
@@ -156,7 +165,7 @@ export const App: React.FC = () => {
         contentHash={selectedDoc?.contentHash || ''}
         onClose={() => setIsSignOpen(false)}
         onSigned={handleDocumentUpdated}
-      />
+      />}
 
     </div>
   );

@@ -788,3 +788,7 @@ textarea.mono {
     transition: none !important;
   }
 }
+.local-mode { max-width: 1280px; width: 100%; margin: 0 auto; padding: 12px var(--page-pad); display: flex; flex-wrap: wrap; gap: 12px 24px; align-items: center; border-bottom: 1px solid var(--rule); }
+.local-mode .field { min-width: 180px; }
+.local-mode select { min-height: 44px; padding: 0.5rem 0.75rem; border: 1px solid var(--rule-strong); border-radius: var(--radius); background: var(--surface); color: var(--ink); font: inherit; }
+.local-mode p { font-size: 13px; color: var(--ink-2); }

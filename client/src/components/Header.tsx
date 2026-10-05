@@ -5,18 +5,20 @@ interface HeaderProps {
   onOpenCreateModal: () => void;
   onRefresh: () => void;
   loading: boolean;
+  workspace?: boolean;
 }
 
-export const Header: React.FC<HeaderProps> = ({ onOpenCreateModal, onRefresh, loading }) => (
+export const Header: React.FC<HeaderProps> = ({ onOpenCreateModal, onRefresh, loading, workspace = false }) => (
   <header className="app-header">
     <div className="header-inner">
       <div>
         <h1 className="brand-name">DocuTrust</h1>
         <p className="brand-subtitle">
-          Multi-party agreements signed with ECDSA keys and checked for edits after signing.
+          {workspace ? 'Sign and verify local files, then share portable signature bundles.'
+            : 'Multi-party agreements signed with ECDSA keys and checked for edits after signing.'}
         </p>
       </div>
-      <div className="header-actions">
+      {!workspace && <div className="header-actions">
         <button type="button" className="btn btn-secondary" onClick={onRefresh} disabled={loading}>
           <RefreshCw size={16} strokeWidth={1.75} aria-hidden="true" />
           {loading ? 'Refreshing' : 'Refresh'}
@@ -25,7 +27,7 @@ export const Header: React.FC<HeaderProps> = ({ onOpenCreateModal, onRefresh, lo
           <Plus size={16} strokeWidth={1.75} aria-hidden="true" />
           New agreement
         </button>
-      </div>
+      </div>}
     </div>
   </header>
 );

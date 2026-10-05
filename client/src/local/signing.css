@@ -1,0 +1,69 @@
+.local-signing { width: 100%; }
+.local-workspace-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 1rem 2rem; border-bottom: 1px solid var(--rule-strong); padding-bottom: 1.5rem; margin-bottom: 1.75rem; }
+.local-workspace-bar .panel-heading { margin-bottom: 0.25rem; }
+.local-privacy { color: var(--ink); font-weight: 600; font-size: 14px; }
+.local-backup-note { flex-basis: 100%; font-size: 13px; color: var(--ink-2); }
+.local-backup-note a { display: inline-flex; min-height: 44px; align-items: center; }
+.local-operation-status { font-size: 14px; color: var(--ink-2); }
+.local-operation-status:not(:empty) { padding-bottom: 1.25rem; }
+.local-retry-storage { margin-bottom: 1rem; }
+.local-workspace-layout { display: grid; grid-template-columns: 208px minmax(0, 1fr); gap: 2.25rem; align-items: start; }
+.local-shelf, .local-desk, .local-sheet-column { min-width: 0; }
+.local-new-file { margin-block: 1rem; width: 100%; padding-inline: 0.65rem; }
+.local-bundle-scroll { max-height: 580px; overflow-y: auto; }
+.local-shelf .doc-item { padding-left: 0.65rem; }
+.local-shelf .row-btn:disabled { cursor: not-allowed; }
+.local-desk { display: grid; grid-template-columns: minmax(0, 1fr) 236px; gap: 2rem; align-items: start; }
+.local-sheet-column { width: 100%; max-width: 720px; margin-inline: auto; }
+.local-signing-sheet { padding: 2.5rem 2.25rem 3rem; }
+.local-signing-sheet .sheet-title { font-size: 34px; }
+.local-eyebrow { color: var(--ink-2); font-family: var(--font-mono); text-transform: uppercase; letter-spacing: 0.08em; font-size: 12px; margin-bottom: 0.5rem; }
+.local-wrap { overflow-wrap: anywhere; }
+.local-dropzone { display: flex; flex-direction: column; align-items: flex-start; gap: 0.65rem; padding: 1.4rem; border: 1px dashed var(--rule-strong); border-radius: var(--radius); background-color: var(--surface); }
+.local-dropzone.is-dragging { border-color: var(--accent); border-style: solid; background-color: var(--accent-soft); }
+.local-file-prompt { font-family: var(--font-heading); font-size: 22px; line-height: 1.2; }
+.local-file-field { width: 100%; }
+.local-file-field input[type="file"] { width: 100%; min-height: 44px; font-size: 13px; }
+.local-file-field input[type="file"]::file-selector-button { min-height: 44px; border: 1px solid var(--rule-strong); border-radius: var(--radius); color: var(--ink); background-color: var(--surface); padding-inline: 0.75rem; margin-right: 0.6rem; cursor: pointer; font-family: var(--font-body); }
+.local-selected-file { display: flex; gap: 0.6rem; align-items: flex-start; margin-top: 1rem; font-size: 14px; }
+.local-selected-file > svg { margin-top: 0.25rem; color: var(--ok); flex: none; }
+.local-file-details { margin-top: 1.5rem; }
+.local-tester { margin-top: 2.25rem; }
+.local-tester > .btn { margin-top: 1rem; }
+.local-tamper-result { margin-top: 1rem; }
+.local-tamper-result .verify-row { display: flex; flex-direction: column; align-items: flex-start; }
+.local-signing-margin { padding-left: 1.25rem; }
+.local-identity-form { display: flex; flex-direction: column; gap: 0.75rem; }
+.local-identity-summary .cell-sub { margin-bottom: 0.8rem; }
+.local-identity-summary .sig-ink { overflow-wrap: anywhere; }
+.local-full-width { width: 100%; }
+.local-key-note { margin-top: 0.75rem; font-size: 12px; }
+.local-signing-actions { display: flex; flex-direction: column; gap: 0.65rem; border-top: 1px solid var(--rule-strong); border-bottom: 1px solid var(--rule-strong); padding-block: 1.25rem; margin-block: 1.5rem; }
+.local-signing-margin .sig-block { padding-bottom: 0.75rem; margin-bottom: 1rem; }
+.local-signing-margin .sig-block .sig-ink { font-size: 26px; overflow-wrap: anywhere; }
+.local-verification { margin-top: 1.5rem; }
+.local-result-line { display: flex; gap: 0.6rem; align-items: baseline; font-size: 14px; font-weight: 600; }
+.local-result-line .status-dot { flex: none; }
+.local-ok { color: var(--ok); }
+.local-bad { color: var(--bad); }
+.local-warn { color: var(--warn); }
+.local-key-boundary { border-top: 1px solid var(--rule-strong); margin-top: 1.5rem; padding-top: 1rem; color: var(--ink-2); font-size: 12px; }
+.local-import-backdrop .modal-card > form { min-height: 0; display: flex; flex-direction: column; }
+.local-import-backdrop .modal-body { max-height: 60vh; }
+
+@media (max-width: 1180px) {
+  .local-desk { grid-template-columns: minmax(0, 1fr); }
+  .local-signing-margin { padding-left: 0; }
+}
+@media (max-width: 800px) {
+  .local-workspace-layout { grid-template-columns: minmax(0, 1fr); gap: 2rem; }
+  .local-bundle-scroll { max-height: 220px; }
+  .local-new-file { width: auto; }
+}
+@media (max-width: 600px) {
+  .local-signing-sheet { padding: 1.75rem 1.25rem 2rem; }
+  .local-signing-sheet .sheet-title { font-size: 30px; }
+  .local-dropzone { padding: 1rem; }
+  .local-workspace-bar .form-actions { width: 100%; }
+  .local-workspace-bar .form-actions .btn { flex: 1; }
+}
