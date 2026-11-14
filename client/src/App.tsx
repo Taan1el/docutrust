@@ -16,6 +16,7 @@ import { DemoBanner } from './components/DemoBanner.js';
 import { StatsBar } from './components/StatsBar.js';
 import { LocalSigning } from './local/LocalSigning.js';
 import { WorkspaceModeControl } from './local/WorkspaceMode.js';
+import { UpdateNotice } from './local/UpdateNotice.js';
 import type { WorkspaceMode } from './local/workspace.js';
 
 export const App: React.FC = () => {
@@ -113,6 +114,7 @@ export const App: React.FC = () => {
 
   return (
     <div className="app-container">
+      <UpdateNotice />
       <DemoBanner onReset={handleDocumentUpdated} workspace={ownData} />
       <Header onOpenCreateModal={() => setIsCreateOpen(true)} onRefresh={loadDocuments} loading={loading} workspace={ownData} />
       {isDemoMode && <WorkspaceModeControl onChange={setWorkspaceMode} />}

@@ -77,6 +77,7 @@ describe('Pages local app build', () => {
     expect(precache).toContain('/docutrust/manifest.webmanifest');
     expect(precache).toContain('/docutrust/sw.js');
     expect(worker).toMatch(/const CACHE_NAME = CACHE_PREFIX \+ "[0-9a-f]{16}";/);
+    expect(worker).toContain('const CACHE_PREFIX = "docutrust-offline-_docutrust_-";');
   });
 
   it('emits every font as a file allowed by the policy', async () => {
@@ -85,34 +86,107 @@ describe('Pages local app build', () => {
     }
   });
 
-  it('serves cached pages offline and deletes only this app\'s older caches', async () => {
+  function runWorker(overrides: Record<string, unknown> = {}) {
     const handlers: Record<string, (event: unknown) => void> = {};
-    const cachedResponse = { body: 'cached page' };
-    const deleted: string[] = [];
     const match = worker.match(/const CACHE_PREFIX = ("[^;]+);/);
     const prefix: string = JSON.parse(match![1]);
-    const cache = { addAll: vi.fn(async () => undefined), match: async () => cachedResponse };
+    const deleted: string[] = [];
+    const cachedResponse = { body: 'cached page' };
+    const cache = {
+      addAll: vi.fn(async (_requests: unknown[]) => undefined),
+      match: vi.fn(async (_request: unknown, _options?: unknown): Promise<unknown> => cachedResponse),
+    };
     const skipWaiting = vi.fn(async () => undefined);
-    const context = {
+    const fetchNetwork = vi.fn(async (_request: unknown, _init?: unknown): Promise<unknown> => { throw new Error('Server is off.'); });
+    const context: Record<string, unknown> = {
       URL,
+      Request: class { constructor(public url: string, public init: unknown) {} },
       caches: { open: async () => cache, keys: async () => [`${prefix}old`, 'another-app-cache'], delete: async (key: string) => { deleted.push(key); } },
-      fetch: async () => { throw new Error('Server is off.'); },
+      fetch: fetchNetwork,
       self: { location: { origin: 'https://local.test' }, addEventListener: (name: string, callback: (event: unknown) => void) => { handlers[name] = callback; }, skipWaiting, clients: { claim: async () => undefined } },
+      ...overrides,
     };
     vm.runInNewContext(worker, context);
+    return { handlers, prefix, deleted, cache, cachedResponse, skipWaiting, fetchNetwork, context };
+  }
+
+  function respond(handlers: Record<string, (event: unknown) => void>, url: string, mode: string): Promise<unknown> | undefined {
+    let response: Promise<unknown> | undefined;
+    handlers.fetch({ request: { method: 'GET', url, mode }, respondWith: (result: Promise<unknown>) => { response = result; } });
+    return response;
+  }
+
+  it('chooses network-first for pages, cache-first for built files and ignores everything else', () => {
+    const { context } = runWorker();
+    const choose = context.strategyFor as (request: unknown) => string;
+    expect(choose({ method: 'GET', url: 'https://local.test/docutrust/', mode: 'navigate' })).toBe('network-first');
+    expect(choose({ method: 'GET', url: 'https://local.test/docutrust/assets/app.js', mode: 'cors' })).toBe('cache-first');
+    expect(choose({ method: 'POST', url: 'https://local.test/docutrust/', mode: 'navigate' })).toBe('ignore');
+    expect(choose({ method: 'GET', url: 'https://outside.test/docutrust/', mode: 'navigate' })).toBe('ignore');
+    expect(choose({ method: 'GET', url: 'https://local.test/another-app/', mode: 'navigate' })).toBe('ignore');
+  });
+
+  it('precaches every file with requests that bypass the HTTP cache', async () => {
+    const { handlers, cache } = runWorker();
     let installation: Promise<void> | undefined;
     handlers.install({ waitUntil: (result: Promise<void>) => { installation = result; } });
     await installation;
-    expect(cache.addAll).toHaveBeenCalled();
-    expect(skipWaiting).not.toHaveBeenCalled();
-    let response: Promise<unknown> | undefined;
-    handlers.fetch({ request: { method: 'GET', url: 'https://local.test/docutrust/', mode: 'navigate' }, respondWith: (result: Promise<unknown>) => { response = result; } });
-    expect(await response).toBe(cachedResponse);
-    const forbiddenResponse = vi.fn();
+    const requests = cache.addAll.mock.calls[0][0] as { url: string; init: { cache: string } }[];
+    expect(requests.length).toBeGreaterThan(5);
+    expect(requests.every((request) => request.init.cache === 'reload')).toBe(true);
+    expect(requests.map((request) => request.url)).toContain('/docutrust/');
+  });
+
+  it('serves a page from the network when online and from the cache when offline', async () => {
+    const online = runWorker();
+    const fresh = { body: 'fresh page' };
+    online.fetchNetwork.mockResolvedValueOnce(fresh);
+    expect(await respond(online.handlers, 'https://local.test/docutrust/', 'navigate')).toBe(fresh);
+    expect(online.fetchNetwork.mock.calls[0][1]).toEqual({ cache: 'no-cache' });
+    expect(online.cache.match).not.toHaveBeenCalled();
+
+    const offline = runWorker();
+    expect(await respond(offline.handlers, 'https://local.test/docutrust/', 'navigate')).toBe(offline.cachedResponse);
+    expect(offline.fetchNetwork).toHaveBeenCalledTimes(1);
+  });
+
+  it('falls back to the cached index page for an unknown page while offline', async () => {
+    const offline = runWorker();
+    offline.cache.match.mockImplementation(async (request: unknown) => typeof request === 'string' ? offline.cachedResponse : undefined);
+    expect(await respond(offline.handlers, 'https://local.test/docutrust/missing?x=1', 'navigate')).toBe(offline.cachedResponse);
+  });
+
+  it('serves built files from the cache without touching the network', async () => {
+    const worker = runWorker();
+    expect(await respond(worker.handlers, 'https://local.test/docutrust/assets/app.js', 'cors')).toBe(worker.cachedResponse);
+    expect(worker.fetchNetwork).not.toHaveBeenCalled();
+  });
+
+  it('does not respond to other origins, other apps or non-GET requests', () => {
+    const { handlers } = runWorker();
+    const forbidden = vi.fn();
     for (const url of ['https://outside.test/docutrust/', 'https://local.test/another-app/']) {
-      handlers.fetch({ request: { method: 'GET', url, mode: 'navigate' }, respondWith: forbiddenResponse });
+      handlers.fetch({ request: { method: 'GET', url, mode: 'navigate' }, respondWith: forbidden });
     }
-    expect(forbiddenResponse).not.toHaveBeenCalled();
+    handlers.fetch({ request: { method: 'POST', url: 'https://local.test/docutrust/', mode: 'navigate' }, respondWith: forbidden });
+    expect(forbidden).not.toHaveBeenCalled();
+  });
+
+  it('waits for the page before activating and then skips waiting on request', async () => {
+    const { handlers, skipWaiting } = runWorker();
+    let installation: Promise<void> | undefined;
+    handlers.install({ waitUntil: (result: Promise<void>) => { installation = result; } });
+    await installation;
+    expect(skipWaiting).not.toHaveBeenCalled();
+    handlers.message({ data: { type: 'something-else' } });
+    handlers.message({ data: null });
+    expect(skipWaiting).not.toHaveBeenCalled();
+    handlers.message({ data: { type: 'SKIP_WAITING' } });
+    expect(skipWaiting).toHaveBeenCalledTimes(1);
+  });
+
+  it("deletes only this app's older caches when it activates", async () => {
+    const { handlers, deleted, prefix } = runWorker();
     let activation: Promise<void> | undefined;
     handlers.activate({ waitUntil: (result: Promise<void>) => { activation = result; } });
     await activation;

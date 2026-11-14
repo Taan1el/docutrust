@@ -1,0 +1,3 @@
+.update-notice:empty { display: none; }
+.update-notice { background-color: var(--accent-soft); border-bottom: 1px solid var(--rule); }
+.update-notice-inner { max-width: 1280px; margin: 0 auto; padding-block: 0.25rem; padding-inline: var(--page-pad); display: flex; align-items: center; flex-wrap: wrap; gap: 0 1.25rem; font-size: 14px; color: var(--ink); }
