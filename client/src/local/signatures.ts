@@ -2,6 +2,9 @@ import { p256Sign, p256Verify, webCrypto as subtle } from './p256.js';
 
 export const SIGNATURE_ALGORITHM = 'ECDSA-P256-SHA256' as const;
 export const MAX_BUNDLE_BYTES = 2 * 1024 * 1024;
+// Web Crypto hashes a whole buffer at once, so the file must fit in memory.
+// 128 MiB reads and hashes reliably in current desktop and mobile browsers.
+export const MAX_FILE_BYTES = 128 * 1024 * 1024;
 
 export interface SigningIdentity {
   name: string;
@@ -24,9 +27,30 @@ export interface SignatureBundle {
   signatures: SignatureRecord[];
 }
 
+export interface SignatureCheck {
+  signer: string;
+  signedAt: string;
+  valid: boolean;
+  error?: string;
+  /** RFC 7638 thumbprint of the record's public key, when the key is readable. */
+  fingerprint?: string;
+}
+
+/** What is known about a selected file. Verification depends on size and SHA-256 only. */
+export interface FileFacts {
+  name?: string | undefined;
+  size: number;
+  sha256?: string | undefined;
+}
+
 export interface VerificationResult {
+  /** True when the size and the SHA-256 of the bytes match the bundle. The name is not part of this. */
   matchesFile: boolean;
-  signatures: { signer: string; signedAt: string; valid: boolean; error?: string }[];
+  sizeMatches: boolean;
+  /** False whenever the size differs, because the bytes cannot then be the same. */
+  contentMatches: boolean;
+  nameMatches: boolean;
+  signatures: SignatureCheck[];
 }
 
 function fail(source: string, field: string, message: string): never {
@@ -176,8 +200,53 @@ function hex(bytes: ArrayBuffer): string {
   return Array.from(new Uint8Array(bytes), (byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
+function formatMiB(size: number): string {
+  // Round up so a file just over the limit never reads as exactly the limit.
+  return `${(Math.ceil(size / (1024 * 1024) * 10) / 10).toLocaleString('en-US')} MiB`;
+}
+
+/** Throws a specific message when a file is too large to hash in memory. */
+export function checkFileSize(file: File | Blob): void {
+  if (file.size > MAX_FILE_BYTES) {
+    const name = 'name' in file && typeof file.name === 'string' && file.name ? `${file.name} is ` : 'The selected file is ';
+    throw new Error(`${name}${formatMiB(file.size)}. Files can be at most ${formatMiB(MAX_FILE_BYTES)} because the browser reads the whole file into memory to hash it.`);
+  }
+}
+
+async function readAndHash(file: File | Blob): Promise<{ size: number; sha256: string }> {
+  checkFileSize(file);
+  const bytes = await fileBytes(file);
+  return { size: bytes.byteLength, sha256: hex(await subtle().digest('SHA-256', bytes)) };
+}
+
 export async function hashFile(file: File | Blob): Promise<string> {
-  return hex(await subtle().digest('SHA-256', await fileBytes(file)));
+  return (await readAndHash(file)).sha256;
+}
+
+/** Reads and hashes a file once. Pass the result to signFile and verifyFacts to avoid reading it again. */
+export async function describeFile(file: File | Blob): Promise<FileFacts> {
+  const { size, sha256 } = await readAndHash(file);
+  return { name: 'name' in file && typeof file.name === 'string' ? file.name : undefined, size, sha256 };
+}
+
+function base64url(buffer: ArrayBuffer): string {
+  return btoa(String.fromCharCode(...new Uint8Array(buffer))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+/** RFC 7638 JWK thumbprint (SHA-256, base64url) of a public P-256 key. */
+export async function keyFingerprint(publicKeyJwk: JsonWebKey): Promise<string> {
+  const key = validatePublicKeyJwk(publicKeyJwk, 'Public key');
+  const members = `{"crv":"P-256","kty":"EC","x":${JSON.stringify(key.x)},"y":${JSON.stringify(key.y)}}`;
+  return base64url(await subtle().digest('SHA-256', new TextEncoder().encode(members)));
+}
+
+/** Groups a fingerprint in fours so it can be read aloud and compared. */
+export function formatFingerprint(fingerprint: string): string {
+  return fingerprint.match(/.{1,4}/g)?.join(' ') ?? fingerprint;
+}
+
+function sameKey(left: JsonWebKey, right: JsonWebKey): boolean {
+  return left.x === right.x && left.y === right.y;
 }
 
 function canonical(value: unknown): string {
@@ -236,26 +305,51 @@ export async function createIdentity(name: string): Promise<SigningIdentity> {
   return { name: trimmedName, privateKey: keys.privateKey, publicKeyJwk, createdAt: new Date().toISOString() };
 }
 
-/** Valid signatures authenticate the bundle. matchesFile separately authenticates the selected bytes and filename. */
-export async function verifyFile(file: File | Blob, value: SignatureBundle): Promise<VerificationResult> {
-  const bundle = validateHeader(value, 'Signature bundle');
-  const matchesFile = file.size === bundle.file.size && await hashFile(file) === bundle.file.sha256 &&
-    (!('name' in file) || file.name === bundle.file.name);
-  const signatures = await Promise.all(bundle.signatures.map(async (value, index) => {
+async function checkSignatures(bundle: ReturnType<typeof validateHeader>): Promise<SignatureCheck[]> {
+  return Promise.all(bundle.signatures.map(async (value, index) => {
     const raw = value && typeof value === 'object' ? value as Record<string, unknown> : {};
     const signer = typeof raw.signer === 'string' ? raw.signer : 'Unknown signer';
     const signedAt = typeof raw.signedAt === 'string' ? raw.signedAt : '';
     try {
       const record = validateRecord(value, 'Signature bundle', `signatures[${index}]`);
-      return { signer, signedAt, ...await verifyRecord(bundle, record) };
+      const fingerprint = await keyFingerprint(record.publicKeyJwk);
+      return { signer, signedAt, fingerprint, ...await verifyRecord(bundle, record) };
     } catch (error) {
       return { signer, signedAt, valid: false, error: error instanceof Error ? error.message : 'The signature record is invalid.' };
     }
   }));
-  return { matchesFile, signatures };
 }
 
-export async function signFile(file: File, identity: SigningIdentity, existing?: SignatureBundle): Promise<SignatureBundle> {
+/** Checks every signature record against the bundle's own file details. No file is needed. */
+export async function verifySignatures(value: SignatureBundle): Promise<SignatureCheck[]> {
+  return checkSignatures(validateHeader(value, 'Signature bundle'));
+}
+
+/**
+ * Valid signatures authenticate the bundle. matchesFile separately authenticates the selected bytes:
+ * the size and the SHA-256 digest. The file name is reported on its own and never fails verification.
+ */
+export async function verifyFacts(facts: FileFacts, value: SignatureBundle): Promise<VerificationResult> {
+  const bundle = validateHeader(value, 'Signature bundle');
+  const sizeMatches = facts.size === bundle.file.size;
+  const contentMatches = sizeMatches && facts.sha256 === bundle.file.sha256;
+  const nameMatches = facts.name === undefined || facts.name === bundle.file.name;
+  return { matchesFile: contentMatches, sizeMatches, contentMatches, nameMatches, signatures: await checkSignatures(bundle) };
+}
+
+/** Hashes the file only when its size already matches, since a different size means different bytes. */
+export async function verifyFile(file: File | Blob, value: SignatureBundle): Promise<VerificationResult> {
+  const bundle = validateHeader(value, 'Signature bundle');
+  const name = 'name' in file && typeof file.name === 'string' ? file.name : undefined;
+  const facts = file.size === bundle.file.size ? await describeFile(file) : { name, size: file.size };
+  return verifyFacts(facts, value);
+}
+
+/**
+ * Signs a file once. Pass facts from describeFile when the caller already hashed the same file.
+ * An existing bundle must describe the same bytes (size and SHA-256); the name may differ.
+ */
+export async function signFile(file: File, identity: SigningIdentity, existing?: SignatureBundle, facts?: FileFacts): Promise<SignatureBundle> {
   label(identity.name, 'Signing identity', 'name', 200);
   timestamp(identity.createdAt, 'Signing identity', 'createdAt');
   const privateKey = identity.privateKey;
@@ -265,15 +359,19 @@ export async function signFile(file: File, identity: SigningIdentity, existing?:
   }
   const publicKeyJwk = validatePublicKeyJwk(identity.publicKeyJwk, 'Signing identity');
   label(file.name, 'Selected file', 'name', 1024);
+  const described = facts ?? await describeFile(file);
   let bundle: SignatureBundle;
   if (existing) {
     bundle = parseBundle(JSON.stringify(existing), 'Existing signature bundle');
-    const result = await verifyFile(file, bundle);
-    if (!result.matchesFile) throw new Error('The selected file does not match the existing bundle filename, size and SHA-256 hash.');
-    if (result.signatures.some((record) => !record.valid)) throw new Error('The existing bundle contains an invalid signature. It cannot be signed again.');
+    if (described.size !== bundle.file.size) throw new Error('The selected file does not match the existing bundle: its size differs.');
+    if (described.sha256 !== bundle.file.sha256) throw new Error('The selected file does not match the existing bundle: its content differs.');
+    if (bundle.signatures.some((record) => sameKey(record.publicKeyJwk, publicKeyJwk))) {
+      throw new Error('This signing key has already signed this file. A key can sign a bundle once; another person can add their own signature.');
+    }
     if (bundle.signatures.length >= 1000) throw new Error('The signature bundle already contains the maximum of 1000 signatures.');
   } else {
-    bundle = { version: 1, algorithm: SIGNATURE_ALGORITHM, file: { name: file.name, size: file.size, sha256: await hashFile(file) }, signatures: [] };
+    if (typeof described.sha256 !== 'string') throw new Error('The selected file has not been hashed.');
+    bundle = { version: 1, algorithm: SIGNATURE_ALGORITHM, file: { name: file.name, size: described.size, sha256: described.sha256 }, signatures: [] };
   }
   const metadata = { signer: identity.name, signedAt: new Date().toISOString(), publicKeyJwk };
   const signature = base64(await p256Sign(privateKey, await signingDigest(bundle, metadata)));

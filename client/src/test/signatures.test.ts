@@ -3,13 +3,19 @@ import { createHash, createPublicKey, verify, webcrypto, type JsonWebKey as Nati
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import {
   createIdentity,
+  describeFile,
+  formatFingerprint,
   hashFile,
+  keyFingerprint,
   MAX_BUNDLE_BYTES,
+  MAX_FILE_BYTES,
   parseBundle,
   serializeBundle,
   signFile,
   validatePublicKeyJwk,
+  verifyFacts,
   verifyFile,
+  verifySignatures,
   type SignatureBundle,
   type SigningIdentity,
 } from '../local/signatures.js';
@@ -32,6 +38,7 @@ const fixedBundle: SignatureBundle = {
     signature: '1ScYhf5zwaulVvugwcVZz1i2jvZXzWv2kEzy6092+C9AmAm7haOm5OJS1FtGdkofcD2Zke71lPgr+4vYRqLo3Q==',
   }],
 };
+const fixedFingerprint = 'xx0BcA-wMohw8atYDJOe6peGModklG2wRHBlXHMvl0M';
 const fixedPayloadDigest = 'e1300fc6eb95263340a883a35c07cd34d07c9add13f581088a18cdb918c01b7c';
 
 function file(contents: string | Uint8Array = fixedBytes, name = fixedBundle.file.name): File {
@@ -101,8 +108,8 @@ describe('fixed interoperability vectors', () => {
   it('verifies a stored P1363 vector using only the public key and selected file', async () => {
     const bundle = parseBundle(JSON.stringify(fixedBundle), 'vector.json');
     expect(await verifyFile(file(), bundle)).toEqual({
-      matchesFile: true,
-      signatures: [{ signer: 'Vector Signer', signedAt: '2026-10-04T12:34:56.000Z', valid: true }],
+      matchesFile: true, sizeMatches: true, contentMatches: true, nameMatches: true,
+      signatures: [{ signer: 'Vector Signer', signedAt: '2026-10-04T12:34:56.000Z', valid: true, fingerprint: fixedFingerprint }],
     });
     expect(verify('sha256', Buffer.from(fixedPayloadDigest, 'hex'), {
       key: createPublicKey({ key: publicKeyJwk as NativeJsonWebKey, format: 'jwk' }), dsaEncoding: 'ieee-p1363',
@@ -176,9 +183,22 @@ describe('file matching and bound metadata', () => {
     expect((await verifyFile(file(new Uint8Array([0])), fixedBundle)).matchesFile).toBe(false);
   });
 
-  it('requires the signed filename for Files while Blobs match bytes and size', async () => {
-    expect((await verifyFile(file(fixedBytes, 'renamed.bin'), fixedBundle)).matchesFile).toBe(false);
-    expect((await verifyFile(new NativeBlob([fixedBytes]) as unknown as Blob, fixedBundle)).matchesFile).toBe(true);
+  it('verifies a renamed file by its bytes and reports the name separately', async () => {
+    const renamed = await verifyFile(file(fixedBytes, 'renamed.bin'), fixedBundle);
+    expect(renamed).toMatchObject({ matchesFile: true, sizeMatches: true, contentMatches: true, nameMatches: false });
+    expect(renamed.signatures[0].valid).toBe(true);
+    const blob = await verifyFile(new NativeBlob([fixedBytes]) as unknown as Blob, fixedBundle);
+    expect(blob).toMatchObject({ matchesFile: true, nameMatches: true });
+  });
+
+  it('says whether the size or the content differs, without hashing a file of another size', async () => {
+    const sameSize = await verifyFile(file(new Uint8Array([9, 9, 9, 9, 9])), fixedBundle);
+    expect(sameSize).toMatchObject({ matchesFile: false, sizeMatches: true, contentMatches: false });
+    const longer = file(new Uint8Array([0, 255, 1, 128, 10, 1]));
+    const read = vi.spyOn(longer, 'arrayBuffer');
+    const otherSize = await verifyFile(longer, fixedBundle);
+    expect(otherSize).toMatchObject({ matchesFile: false, sizeMatches: false, contentMatches: false });
+    expect(read).not.toHaveBeenCalled();
   });
 
   const mutations: [string, (bundle: SignatureBundle) => void][] = [
@@ -258,26 +278,46 @@ describe('multiple parties', () => {
     const selected = file(fixedBytes, '界'.repeat(1024));
     const initial = await signFile(selected, identity);
     const dense: SignatureBundle = { ...initial, signatures: Array.from({ length: 999 }, () => structuredClone(initial.signatures[0])) };
-    const completed = await signFile(selected, identity, dense);
+    const second = await createIdentity('界'.repeat(200));
+    Object.assign(second.publicKeyJwk, { kid: '界'.repeat(200) });
+    const completed = await signFile(selected, second, dense);
     const text = serializeBundle(completed);
     const byteLength = new TextEncoder().encode(text).byteLength;
     expect(byteLength).toBeGreaterThan(MAX_BUNDLE_BYTES * 0.7);
     expect(byteLength).toBeLessThanOrEqual(MAX_BUNDLE_BYTES);
     expect(parseBundle(text, 'dense.signatures.json').signatures).toHaveLength(1000);
     expect(completed.signatures[0]).toEqual(initial.signatures[0]);
-    expect(completed.signatures[999].signer).toBe(identity.name);
+    expect(completed.signatures[999].signer).toBe(second.name);
   });
 
-  it('rejects an append for the wrong file or filename', async () => {
+  it('rejects an append for different bytes and says whether size or content differs', async () => {
     const identity = await generatedIdentity();
-    await expect(signFile(file('wrong'), identity, fixedBundle)).rejects.toThrow('does not match the existing bundle');
-    await expect(signFile(file(fixedBytes, 'renamed.bin'), identity, fixedBundle)).rejects.toThrow('does not match the existing bundle');
+    await expect(signFile(file('wrong and longer'), identity, fixedBundle)).rejects.toThrow('its size differs');
+    await expect(signFile(file(new Uint8Array([9, 9, 9, 9, 9])), identity, fixedBundle)).rejects.toThrow('its content differs');
   });
 
-  it('rejects an append when an existing signature is invalid', async () => {
+  it('appends to a bundle for a renamed copy of the same bytes and keeps the signed name', async () => {
+    const result = await signFile(file(fixedBytes, 'renamed.bin'), await generatedIdentity(), fixedBundle);
+    expect(result.file.name).toBe(fixedBundle.file.name);
+    expect(result.signatures).toHaveLength(2);
+  });
+
+  it('still signs a bundle that holds an invalid signature and reports it as invalid', async () => {
     const bundle = clone();
     bundle.signatures[0].signer = 'Forged Signer';
-    await expect(signFile(file(), await generatedIdentity(), bundle)).rejects.toThrow('existing bundle contains an invalid signature');
+    const result = await signFile(file(), await createIdentity('Bob'), bundle);
+    expect(result.signatures).toHaveLength(2);
+    expect((await verifySignatures(result)).map((check) => check.valid)).toEqual([false, true]);
+    expect((await verifyFile(file(), result)).signatures[1]).toMatchObject({ signer: 'Bob', valid: true });
+  });
+
+  it('refuses a second signature by the same key on the same bundle', async () => {
+    const identity = await createIdentity('Alice');
+    const first = await signFile(file(), identity);
+    await expect(signFile(file(), identity, first)).rejects.toThrow('This signing key has already signed this file');
+    const other = await signFile(file(), await createIdentity('Bob'), first);
+    expect(other.signatures).toHaveLength(2);
+    await expect(signFile(file(), identity, other)).rejects.toThrow('already signed');
   });
 
   it('rejects a mismatched private and public identity key', async () => {
@@ -296,6 +336,80 @@ describe('multiple parties', () => {
     const identity = await generatedIdentity();
     identity.privateKey = (await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-384' }, false, ['sign', 'verify'])).privateKey;
     await expect(signFile(file(), identity)).rejects.toThrow('must be a non-extractable ECDSA P-256 signing key');
+  });
+});
+
+describe('key fingerprints', () => {
+  it('computes the RFC 7638 thumbprint of the public key', async () => {
+    expect(await keyFingerprint(publicKeyJwk)).toBe(fixedFingerprint);
+    const members = JSON.stringify({ crv: 'P-256', kty: 'EC', x: publicKeyJwk.x, y: publicKeyJwk.y });
+    expect(createHash('sha256').update(members).digest('base64url')).toBe(fixedFingerprint);
+  });
+
+  it('ignores optional JWK members and differs between keys', async () => {
+    const identity = await createIdentity('Alice');
+    const bare = { kty: 'EC', crv: 'P-256', x: identity.publicKeyJwk.x, y: identity.publicKeyJwk.y };
+    expect(await keyFingerprint(identity.publicKeyJwk)).toBe(await keyFingerprint(bare));
+    expect(await keyFingerprint(identity.publicKeyJwk)).not.toBe(fixedFingerprint);
+  });
+
+  it('groups a fingerprint in fours for reading', () => {
+    expect(formatFingerprint(fixedFingerprint)).toBe('xx0B cA-w Mohw 8atY DJOe 6peG Modk lG2w RHBl XHMv l0M');
+  });
+
+  it('rejects a key that is not a public P-256 JWK', async () => {
+    await expect(keyFingerprint({ kty: 'EC', crv: 'P-384', x: 'a', y: 'b' })).rejects.toThrow('crv');
+  });
+
+  it('reports each signature key in verification results', async () => {
+    const result = await verifyFile(file(), fixedBundle);
+    expect(result.signatures[0].fingerprint).toBe(fixedFingerprint);
+  });
+});
+
+describe('file size limit and single reads', () => {
+  function oversized(): File {
+    const big = file();
+    Object.defineProperty(big, 'size', { value: MAX_FILE_BYTES + 1 });
+    return big;
+  }
+
+  it('states a limit of 128 MiB with a specific message before reading anything', async () => {
+    expect(MAX_FILE_BYTES).toBe(128 * 1024 * 1024);
+    const big = oversized();
+    const read = vi.spyOn(big, 'arrayBuffer');
+    await expect(hashFile(big)).rejects.toThrow('128 MiB');
+    await expect(describeFile(big)).rejects.toThrow('Files can be at most 128 MiB');
+    await expect(signFile(big, await createIdentity('Alice'))).rejects.toThrow('fixed-vector.bin is 128.1 MiB');
+    expect(read).not.toHaveBeenCalled();
+  });
+
+  it('accepts a file exactly at the limit size check', async () => {
+    const atLimit = file();
+    Object.defineProperty(atLimit, 'size', { value: MAX_FILE_BYTES });
+    await expect(describeFile(atLimit)).resolves.toMatchObject({ size: 5 });
+  });
+
+  it('reads and hashes a file once per sign, verify and sign-with-facts operation', async () => {
+    const identity = await createIdentity('Alice');
+    const fresh = file();
+    const read = vi.spyOn(fresh, 'arrayBuffer');
+    const signed = await signFile(fresh, identity);
+    expect(read).toHaveBeenCalledTimes(1);
+    const again = file();
+    const readAgain = vi.spyOn(again, 'arrayBuffer');
+    await signFile(again, await createIdentity('Bob'), signed);
+    expect(readAgain).toHaveBeenCalledTimes(1);
+    const verified = file();
+    const readVerified = vi.spyOn(verified, 'arrayBuffer');
+    await verifyFile(verified, signed);
+    expect(readVerified).toHaveBeenCalledTimes(1);
+    const prepared = file();
+    const readPrepared = vi.spyOn(prepared, 'arrayBuffer');
+    const facts = await describeFile(prepared);
+    const third = await signFile(prepared, await createIdentity('Carol'), signed, facts);
+    expect(await verifyFacts(facts, third)).toMatchObject({ matchesFile: true });
+    expect(readPrepared).toHaveBeenCalledTimes(1);
   });
 });
 
