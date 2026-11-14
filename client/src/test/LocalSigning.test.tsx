@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { LocalSigning, type LocalSigningWorkspace } from '../local/LocalSigning.js';
-import { createIdentity, parseBundle, serializeBundle, signFile, verifyFile, type SignatureBundle } from '../local/signatures.js';
+import { createIdentity, keyFingerprint, parseBundle, serializeBundle, signFile, verifyFile, type SignatureBundle } from '../local/signatures.js';
 import { axe } from './axe.js';
 
 const storage = vi.hoisted(() => {
@@ -42,14 +42,23 @@ beforeEach(() => {
   sessionStorage.clear();
 });
 
-afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+afterEach(() => {
+  cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals();
+  Reflect.deleteProperty(navigator, 'storage');
+});
+
+function stubStorageManager(persisted: boolean, persist: boolean) {
+  const manager = { persist: vi.fn().mockResolvedValue(persist), persisted: vi.fn().mockResolvedValue(persisted) };
+  Object.defineProperty(navigator, 'storage', { configurable: true, value: manager });
+  return manager;
+}
 
 describe('local signing workspace', () => {
   it('starts empty, identifies the storage boundary, and needs no sample data', async () => {
     await openWorkspace();
     expect(screen.getByText('Your data stays in this browser.')).toBeInTheDocument();
     expect(screen.getByText('0 saved bundles')).toBeInTheDocument();
-    expect(screen.getByText('Signatures prove a file matches what a key signed. They do not prove who owns the key.')).toBeInTheDocument();
+    expect(screen.getByText(/Signatures prove a file matches what a key signed\. They do not prove who owns the key\. Compare the key fingerprint with the signer through another channel/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Sign file' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Verify file' })).toBeDisabled();
     expect(storage.save).not.toHaveBeenCalled();
@@ -294,12 +303,17 @@ describe('local signing workspace', () => {
     await user.click(screen.getByRole('button', { name: 'Sign file' }));
     await screen.findByText('Signature added and saved.');
     const firstSaved: LocalSigningWorkspace = storage.save.mock.calls.at(-1)?.[0];
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    await user.click(screen.getByRole('button', { name: 'Create another identity' }));
+    await user.type(screen.getByLabelText('Name for this signing key'), 'Second signer');
+    await user.click(screen.getByRole('button', { name: 'Create identity' }));
+    await screen.findByText('Signing identity created and saved in this browser.');
     const currentIdentity = await createIdentity('Current saved signer');
     storage.save.mockRejectedValueOnce(new storage.ConflictError());
     storage.load.mockResolvedValueOnce({ data: { ...firstSaved, identity: currentIdentity }, revision: 3 });
     await user.click(screen.getByRole('button', { name: 'Add signature' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('Another tab changed the saved signing workspace.');
-    expect(storage.save.mock.calls.at(-1)?.[1]).toEqual({ expectedRevision: 2 });
+    expect(storage.save.mock.calls.at(-1)?.[1]).toEqual({ expectedRevision: 3 });
     expect(screen.getByRole('button', { name: 'Create another identity' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Clear workspace' })).toBeDisabled();
     expect(screen.queryByText(/Changes saved/)).not.toBeInTheDocument();
@@ -399,6 +413,265 @@ describe('local signing workspace', () => {
     expect(confirmation).toHaveBeenCalledWith(expect.stringContaining('cannot be recovered'));
     expect(storage.save).not.toHaveBeenCalled();
     expect(screen.getByText('Alice')).toBeInTheDocument();
+  });
+
+  it('verifies a renamed copy by its bytes and shows the name difference as a separate notice', async () => {
+    const user = userEvent.setup();
+    const { bundle } = await fixture();
+    await openWorkspace({ version: 1, bundles: [bundle] });
+    await user.upload(screen.getByLabelText('Choose file'), binaryFile('renamed-copy.bin'));
+    await user.click(screen.getByRole('button', { name: 'Verify file' }));
+    await screen.findByText('File and signatures verified');
+    expect(screen.getByText('File size and bytes match the bundle.')).toBeInTheDocument();
+    expect(screen.getByText('File name differs from the signed name: contract.bin')).toBeInTheDocument();
+  });
+
+  it('says whether the size or the content differs when verification fails', async () => {
+    const user = userEvent.setup();
+    const { bundle } = await fixture();
+    await openWorkspace({ version: 1, bundles: [bundle] });
+    await user.upload(screen.getByLabelText('Choose file'), binaryFile('contract.bin', new Uint8Array([1, 2, 3])));
+    await user.click(screen.getByRole('button', { name: 'Verify file' }));
+    await screen.findByText('Verification failed');
+    expect(screen.getByText('File size differs: the selected file is 3 bytes and the bundle expects 4 bytes.')).toBeInTheDocument();
+    await user.upload(screen.getByLabelText('Choose file'), binaryFile('contract.bin', new Uint8Array([9, 9, 9, 9])));
+    await user.click(screen.getByRole('button', { name: 'Verify file' }));
+    await screen.findByText('File content differs: the SHA-256 hash of the selected file does not match the bundle.');
+    expect(screen.queryByText(/File name differs/)).not.toBeInTheDocument();
+  });
+
+  it('starts a new bundle when the chosen file does not match the auto-selected saved bundle', async () => {
+    const user = userEvent.setup();
+    const { bundle } = await fixture();
+    const identity = await createIdentity('Bob');
+    await openWorkspace({ version: 1, identity, bundles: [bundle] });
+    expect(screen.getByRole('button', { name: 'Add signature' })).toBeDisabled();
+    await user.upload(screen.getByLabelText('Choose file'), binaryFile('another.bin', new Uint8Array([7, 7, 7])));
+    await user.click(screen.getByRole('button', { name: 'Add signature' }));
+    await screen.findByText(/This file does not match the selected bundle, so a new bundle was started for it\./);
+    const saved: LocalSigningWorkspace = storage.save.mock.calls[0][0];
+    expect(saved.bundles).toHaveLength(2);
+    expect(saved.bundles[0].file).toMatchObject({ name: 'another.bin', size: 3 });
+    expect(saved.bundles[0].signatures).toHaveLength(1);
+    expect(saved.bundles[1]).toEqual(bundle);
+    expect(screen.getByRole('heading', { name: 'another.bin' })).toBeInTheDocument();
+    expect(screen.getByText(/another\.bin/, { selector: 'strong' })).toBeInTheDocument();
+    expect(screen.getByText('File and signatures verified')).toBeInTheDocument();
+  });
+
+  it('adds the signature to the saved bundle whose hash matches the chosen file', async () => {
+    const user = userEvent.setup();
+    const { bundle } = await fixture();
+    const otherFile = binaryFile('other.bin', new Uint8Array([5, 5]));
+    const other = await signFile(otherFile, await createIdentity('Alice'));
+    const identity = await createIdentity('Bob');
+    await openWorkspace({ version: 1, identity, bundles: [bundle, other] });
+    await user.upload(screen.getByLabelText('Choose file'), binaryFile('other-renamed.bin', new Uint8Array([5, 5])));
+    await user.click(screen.getByRole('button', { name: 'Add signature' }));
+    await screen.findByText(/This file matches the saved bundle for other\.bin, so the signature was added there\./);
+    const saved: LocalSigningWorkspace = storage.save.mock.calls[0][0];
+    expect(saved.bundles).toHaveLength(2);
+    expect(saved.bundles[0].file.name).toBe('other.bin');
+    expect(saved.bundles[0].signatures).toHaveLength(2);
+    expect(saved.bundles[1]).toEqual(bundle);
+    expect(screen.getByText(/The file name differs from the signed name/)).toBeInTheDocument();
+  });
+
+  it('signs a file that already has a saved bundle without losing its signatures when no bundle is selected', async () => {
+    const user = userEvent.setup();
+    const { file, bundle } = await fixture();
+    const identity = await createIdentity('Bob');
+    await openWorkspace({ version: 1, identity, bundles: [bundle] });
+    await user.click(screen.getByRole('button', { name: 'Start another file' }));
+    await user.upload(screen.getByLabelText('Choose file'), file);
+    await user.click(screen.getByRole('button', { name: 'Sign file' }));
+    await screen.findByText(/This file matches the saved bundle for contract\.bin/);
+    const saved: LocalSigningWorkspace = storage.save.mock.calls[0][0];
+    expect(saved.bundles).toHaveLength(1);
+    expect(saved.bundles[0].signatures).toHaveLength(2);
+    expect(saved.bundles[0].signatures[0]).toEqual(bundle.signatures[0]);
+  });
+
+  it('shows the key fingerprint for the identity, every signature and the verification result', async () => {
+    const user = userEvent.setup();
+    const { file, bundle } = await fixture();
+    const identity = await createIdentity('Bob');
+    await openWorkspace({ version: 1, identity, bundles: [bundle] });
+    const aliceKey = await keyFingerprint(bundle.signatures[0].publicKeyJwk);
+    const bobKey = await keyFingerprint(identity.publicKeyJwk);
+    const grouped = (value: string) => value.match(/.{1,4}/g)!.join(' ');
+    expect(await screen.findAllByText(grouped(aliceKey))).toHaveLength(1);
+    expect(await screen.findByText(grouped(bobKey))).toHaveClass('mono');
+    await user.upload(screen.getByLabelText('Choose file'), file);
+    await user.click(screen.getByRole('button', { name: 'Verify file' }));
+    await screen.findByText('File and signatures verified');
+    expect(await screen.findAllByText(grouped(aliceKey))).toHaveLength(2);
+    await user.click(screen.getByRole('button', { name: 'Copy key fingerprint for Alice' }));
+    expect(await navigator.clipboard.readText()).toBe(aliceKey);
+    await screen.findByText('Key fingerprint copied.');
+    await user.click(screen.getByRole('button', { name: 'Copy key fingerprint for Bob' }));
+    expect(await navigator.clipboard.readText()).toBe(bobKey);
+  });
+
+  it('refuses a second signature by the same key with a clear message', async () => {
+    const user = userEvent.setup();
+    const { file, bundle } = await fixture();
+    const alice = await createIdentity('Alice');
+    const signed = await signFile(file, alice);
+    await openWorkspace({ version: 1, identity: alice, bundles: [signed] });
+    expect(bundle.signatures).toHaveLength(1);
+    await user.upload(screen.getByLabelText('Choose file'), file);
+    await user.click(screen.getByRole('button', { name: 'Add signature' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('This signing key has already signed this file.');
+    expect(storage.save).not.toHaveBeenCalled();
+    expect(screen.getByText('1 signature · 4 bytes')).toBeInTheDocument();
+  });
+
+  it('rejects a file over the limit with a specific message and keeps no file selected', async () => {
+    const user = userEvent.setup();
+    const identity = await createIdentity('Alice');
+    await openWorkspace({ version: 1, identity, bundles: [] });
+    expect(screen.getByText(/Files up to 128 MiB\./)).toBeInTheDocument();
+    const big = binaryFile('huge.iso');
+    Object.defineProperty(big, 'size', { value: 128 * 1024 * 1024 + 1 });
+    const read = vi.fn();
+    Object.defineProperty(big, 'arrayBuffer', { value: read });
+    await user.upload(screen.getByLabelText('Choose file'), big);
+    expect(await screen.findByRole('alert')).toHaveTextContent('huge.iso is 128.1 MiB. Files can be at most 128 MiB');
+    expect(screen.getByRole('button', { name: 'Sign file' })).toBeDisabled();
+    expect(screen.queryByText(/selected in memory/)).not.toBeInTheDocument();
+    expect(read).not.toHaveBeenCalled();
+  });
+
+  it('shows a busy state while hashing and reads the file once to sign it', async () => {
+    const user = userEvent.setup();
+    const identity = await createIdentity('Alice');
+    await openWorkspace({ version: 1, identity, bundles: [] });
+    const file = binaryFile();
+    let release: (bytes: ArrayBuffer) => void = () => undefined;
+    const read = vi.fn(() => new Promise<ArrayBuffer>((resolve) => { release = resolve; }));
+    Object.defineProperty(file, 'arrayBuffer', { value: read });
+    await user.upload(screen.getByLabelText('Choose file'), file);
+    await user.click(screen.getByRole('button', { name: 'Sign file' }));
+    expect(await screen.findByText('Reading and hashing the file in this browser.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Working' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Verify file' })).toBeDisabled();
+    release(new Uint8Array([0, 255, 10, 128]).buffer);
+    await screen.findByText('Signature added and saved.');
+    expect(read).toHaveBeenCalledTimes(1);
+  });
+
+  it('asks the browser to keep storage when an identity is created and says what it answered', async () => {
+    const user = userEvent.setup();
+    const manager = stubStorageManager(false, false);
+    await openWorkspace();
+    await user.type(screen.getByLabelText('Name for this signing key'), 'Alice');
+    await user.click(screen.getByRole('button', { name: 'Create identity' }));
+    await screen.findByText('Signing identity created and saved in this browser.');
+    expect(manager.persist).toHaveBeenCalledTimes(1);
+    expect(await screen.findByText(/This browser may clear the key under storage pressure\./)).toBeInTheDocument();
+    expect(screen.queryByText(/Storage is marked persistent/)).not.toBeInTheDocument();
+  });
+
+  it('reports persistent storage when the browser grants it', async () => {
+    const user = userEvent.setup();
+    const manager = stubStorageManager(true, true);
+    await openWorkspace();
+    await user.type(screen.getByLabelText('Name for this signing key'), 'Alice');
+    await user.click(screen.getByRole('button', { name: 'Create identity' }));
+    expect(await screen.findByText('Storage is marked persistent for this site.')).toBeInTheDocument();
+    expect(manager.persist).toHaveBeenCalledTimes(1);
+  });
+
+  it('reads the persistence state for a saved identity without asking again', async () => {
+    const manager = stubStorageManager(true, true);
+    await openWorkspace({ version: 1, identity: await createIdentity('Alice'), bundles: [] });
+    expect(await screen.findByText('Storage is marked persistent for this site.')).toBeInTheDocument();
+    expect(manager.persist).not.toHaveBeenCalled();
+  });
+
+  it('works and says so when the browser cannot report persistence', async () => {
+    const user = userEvent.setup();
+    await openWorkspace();
+    await user.type(screen.getByLabelText('Name for this signing key'), 'Alice');
+    await user.click(screen.getByRole('button', { name: 'Create identity' }));
+    expect(await screen.findByText(/does not report whether storage is persistent/)).toBeInTheDocument();
+    expect(storage.save).toHaveBeenCalled();
+  });
+
+  it('deletes one saved bundle after confirmation and keeps the others and the identity', async () => {
+    const user = userEvent.setup();
+    const { bundle } = await fixture();
+    const other = await signFile(binaryFile('other.bin', new Uint8Array([5, 5])), await createIdentity('Carol'));
+    const identity = await createIdentity('Bob');
+    await openWorkspace({ version: 1, identity, bundles: [bundle, other] });
+    const confirmation = vi.spyOn(window, 'confirm').mockReturnValueOnce(false).mockReturnValueOnce(true);
+    await user.click(screen.getByRole('button', { name: 'Delete bundle' }));
+    expect(storage.save).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: 'Delete bundle' }));
+    await screen.findByText('Bundle deleted. Your signing identity was kept.');
+    expect(confirmation).toHaveBeenCalledWith(expect.stringContaining('contract.bin'));
+    expect(storage.save.mock.calls[0][0]).toEqual({ version: 1, identity, bundles: [other] });
+    expect(screen.getByText('1 saved bundle')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Delete bundle' })).toBeDisabled();
+  });
+
+  it('shows an invalid imported signature as invalid, still signs, and lets the user remove it', async () => {
+    const user = userEvent.setup();
+    const { file, bundle } = await fixture();
+    const forged = structuredClone(bundle);
+    forged.signatures[0].signer = 'Forged signer';
+    const identity = await createIdentity('Bob');
+    await openWorkspace({ version: 1, identity, bundles: [forged] });
+    expect(await screen.findByText('Invalid signature. It does not authenticate this file.')).toBeInTheDocument();
+    await user.upload(screen.getByLabelText('Choose file'), file);
+    await user.click(screen.getByRole('button', { name: 'Add signature' }));
+    await screen.findByText('Signature added and saved.');
+    expect(storage.save.mock.calls[0][0].bundles[0].signatures).toHaveLength(2);
+    const confirmation = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    await user.click(await screen.findByRole('button', { name: 'Remove invalid signature by Forged signer' }));
+    await screen.findByText('Invalid signature removed.');
+    expect(confirmation).toHaveBeenCalledWith(expect.stringContaining('Forged signer'));
+    const saved: LocalSigningWorkspace = storage.save.mock.calls.at(-1)?.[0];
+    expect(saved.bundles[0].signatures).toHaveLength(1);
+    expect(saved.bundles[0].signatures[0].signer).toBe('Bob');
+    expect(screen.queryByRole('button', { name: /Remove invalid signature/ })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Verify file' }));
+    await screen.findByText('File and signatures verified');
+  });
+
+  it('removes a bundle whose only signature is invalid', async () => {
+    const user = userEvent.setup();
+    const { bundle } = await fixture();
+    const forged = structuredClone(bundle);
+    forged.signatures[0].signer = 'Forged signer';
+    await openWorkspace({ version: 1, bundles: [forged] });
+    const confirmation = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    await user.click(await screen.findByRole('button', { name: 'Remove invalid signature by Forged signer' }));
+    await screen.findByText('Invalid signature removed with its empty bundle.');
+    expect(confirmation).toHaveBeenCalledWith(expect.stringContaining('would be empty'));
+    expect(storage.save.mock.calls[0][0].bundles).toEqual([]);
+    expect(screen.getByText('0 saved bundles')).toBeInTheDocument();
+  });
+
+  it('has no axe violations with fingerprints, an invalid signature, a name notice and a size message', async () => {
+    const user = userEvent.setup();
+    stubStorageManager(false, false);
+    const { bundle } = await fixture();
+    const forged = structuredClone(bundle);
+    forged.signatures[0].signer = 'Forged signer';
+    const identity = await createIdentity('Bob');
+    const view = await openWorkspace({ version: 1, identity, bundles: [forged] });
+    await screen.findByText('Invalid signature. It does not authenticate this file.');
+    await screen.findAllByText(/This browser may clear the key/);
+    await user.upload(screen.getByLabelText('Choose file'), binaryFile('renamed.bin'));
+    await user.click(screen.getByRole('button', { name: 'Verify file' }));
+    await screen.findByText(/File name differs from the signed name/);
+    expect(await axe(view.container)).toHaveNoViolations();
+    await user.upload(screen.getByLabelText('Choose file'), binaryFile('short.bin', new Uint8Array([1])));
+    await user.click(screen.getByRole('button', { name: 'Verify file' }));
+    await screen.findByText(/File size differs/);
+    expect(await axe(view.container)).toHaveNoViolations();
   });
 
   it('has no axe violations in the empty workspace, signed result, and import dialog', async () => {

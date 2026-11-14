@@ -1,9 +1,10 @@
 import { useEffect, useId, useRef, useState, type DragEvent, type FormEvent, type RefObject } from 'react';
-import { Check, Download, FileCheck2, FileUp, KeyRound, PenLine, ShieldCheck, Trash2, Upload, X } from 'lucide-react';
+import { Check, Copy, Download, FileCheck2, FileUp, KeyRound, PenLine, ShieldCheck, Trash2, Upload, X } from 'lucide-react';
 import { formatTimestamp } from '../utils/format.js';
 import { downloadFile } from './files.js';
+import { readDurability, requestDurability, type StorageDurability } from './durability.js';
 import { loadWorkspaceSnapshot, saveWorkspace, WorkspaceConflictError } from './workspace.js';
-import { createIdentity, MAX_BUNDLE_BYTES, parseBundle, serializeBundle, signFile, validatePublicKeyJwk, verifyFile, type SignatureBundle, type SigningIdentity } from './signatures.js';
+import { checkFileSize, createIdentity, describeFile, formatFingerprint, keyFingerprint, MAX_BUNDLE_BYTES, MAX_FILE_BYTES, parseBundle, serializeBundle, signFile, validatePublicKeyJwk, verifyFacts, verifyFile, verifySignatures, type SignatureBundle, type SignatureCheck, type SigningIdentity } from './signatures.js';
 import './signing.css';
 
 export interface LocalSigningWorkspace {
@@ -77,6 +78,40 @@ function mergeBundle(existing: SignatureBundle | undefined, incoming: SignatureB
 
 function byteLabel(size: number): string {
   return `${size.toLocaleString('en-US')} ${size === 1 ? 'byte' : 'bytes'}`;
+}
+
+const FILE_LIMIT_LABEL = `${MAX_FILE_BYTES / (1024 * 1024)} MiB`;
+
+function sameFileBytes(bundle: SignatureBundle, facts: { size: number; sha256?: string | undefined }): boolean {
+  return bundle.file.size === facts.size && bundle.file.sha256 === facts.sha256;
+}
+
+interface KeyFingerprintProps {
+  jwk?: JsonWebKey;
+  /** Use when the fingerprint is already known, for example from a verification result. */
+  fingerprint?: string | undefined;
+  label: string;
+  onCopy?: (fingerprint: string) => void;
+}
+
+/** RFC 7638 thumbprint of a public key, grouped in fours. Compare it with the signer through another channel. */
+function KeyFingerprint({ jwk, fingerprint, label, onCopy }: KeyFingerprintProps) {
+  const [computed, setComputed] = useState<string | null>(null);
+  useEffect(() => {
+    if (fingerprint !== undefined || !jwk) return;
+    let active = true;
+    setComputed(null);
+    keyFingerprint(jwk).then((value) => { if (active) setComputed(value); }).catch(() => { if (active) setComputed(''); });
+    return () => { active = false; };
+  }, [jwk, fingerprint]);
+  const value = fingerprint ?? (jwk ? computed : '');
+  return <div className="local-fingerprint">
+    <p className="local-fingerprint-label">Key fingerprint</p>
+    {value === null ? <p className="local-fingerprint-label">Calculating</p>
+      : value ? <p className="mono local-fingerprint-value">{formatFingerprint(value)}</p>
+      : <p className="local-fingerprint-label">Not available for this key.</p>}
+    {onCopy && value && <button type="button" className="btn btn-secondary local-copy" aria-label={`Copy key fingerprint for ${label}`} onClick={() => onCopy(value)}><Copy size={16} strokeWidth={1.75} aria-hidden="true" />Copy</button>}
+  </div>;
 }
 
 interface ImportDialogProps {
@@ -176,6 +211,8 @@ export function LocalSigning() {
   const [storedChange, setStoredChange] = useState(false);
   const [nudged, setNudged] = useState(backupSeen);
   const [dragging, setDragging] = useState(false);
+  const [durability, setDurability] = useState<StorageDurability | null>(null);
+  const [checks, setChecks] = useState<{ bundle: SignatureBundle; results: SignatureCheck[] } | null>(null);
   const importButtonRef = useRef<HTMLButtonElement>(null);
   const exportButtonRef = useRef<HTMLButtonElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -183,6 +220,21 @@ export function LocalSigning() {
   const selectedBundle = workspace.bundles.find((bundle) => bundleKey(bundle) === selectedKey) ?? null;
   const identity = workspace.identity;
   const disabled = loading || busy;
+  const signatureChecks = checks && checks.bundle === selectedBundle ? checks.results : null;
+
+  useEffect(() => {
+    if (!identity) { setDurability(null); return; }
+    let active = true;
+    void readDurability().then((value) => { if (active) setDurability(value); });
+    return () => { active = false; };
+  }, [identity]);
+
+  useEffect(() => {
+    if (!selectedBundle) { setChecks(null); return; }
+    let active = true;
+    void verifySignatures(selectedBundle).then((results) => { if (active) setChecks({ bundle: selectedBundle, results }); }).catch(() => { if (active) setChecks(null); });
+    return () => { active = false; };
+  }, [selectedBundle]);
 
   useEffect(() => {
     let active = true;
@@ -233,7 +285,16 @@ export function LocalSigning() {
   }
 
   function chooseFile(next: File | null) {
-    setFile(next); setVerification(null); setTamperResult(null); setError(''); setStatus('');
+    setVerification(null); setTamperResult(null); setError(''); setStatus('');
+    if (next) {
+      try { checkFileSize(next); }
+      catch (reason) {
+        setFile(null); setError(errorMessage(reason));
+        if (fileInputRef.current) fileInputRef.current.value = '';
+        return;
+      }
+    }
+    setFile(next);
   }
 
   function chooseBundle(bundle: SignatureBundle | null) {
@@ -270,6 +331,7 @@ export function LocalSigning() {
     if (identity && !window.confirm('Replace the saved signing identity? Its private key will be permanently removed from this browser and cannot be recovered. Existing signatures remain verifiable.')) return;
     await run(async () => {
       const created = await createIdentity(identityName.trim());
+      setDurability(await requestDurability());
       const saved = await store({ ...workspace, identity: created });
       setIdentityName(''); setNewIdentity(false);
       setStatus(saved ? 'Signing identity created and saved in this browser.' : 'Signing identity created for this session.');
@@ -279,18 +341,77 @@ export function LocalSigning() {
   async function signSelectedFile() {
     if (!file || !identity) return;
     await run(async () => {
-      const bundle = await signFile(file, identity, selectedBundle ?? undefined);
+      setStatus('Reading and hashing the file in this browser.');
+      const facts = await describeFile(file);
+      // Sign into the selected bundle only when it describes these bytes. Otherwise use the saved
+      // bundle for this file, or start a new one, so a returning user can sign a different file.
+      let target = selectedBundle && sameFileBytes(selectedBundle, facts) ? selectedBundle : null;
+      let note = '';
+      if (!target) {
+        target = workspace.bundles.find((item) => sameFileBytes(item, facts)) ?? null;
+        if (target) note = `This file matches the saved bundle for ${target.file.name}, so the signature was added there.`;
+        else if (selectedBundle) note = 'This file does not match the selected bundle, so a new bundle was started for it.';
+      }
+      const bundle = await signFile(file, identity, target ?? undefined, facts);
       const key = bundleKey(bundle);
-      const checked = await verifyFile(file, bundle);
+      const checked = await verifyFacts(facts, bundle);
       const saved = await store({ ...workspace, bundles: [bundle, ...workspace.bundles.filter((item) => bundleKey(item) !== key)] });
       setSelectedKey(key); setVerification(checked); setTamperResult(null);
-      setStatus(saved ? 'Signature added and saved.' : 'Signature added for this session. Export the bundle to keep it.');
+      const messages = [saved ? 'Signature added and saved.' : 'Signature added for this session. Export the bundle to keep it.'];
+      if (note) messages.push(note);
+      if (!checked.nameMatches) messages.push(`The file name differs from the signed name, so the bundle keeps ${bundle.file.name}.`);
+      setStatus(messages.join(' '));
     });
   }
 
   async function verifySelectedFile() {
     if (!file || !selectedBundle) return;
-    await run(async () => { setVerification(await verifyFile(file, selectedBundle)); setTamperResult(null); });
+    await run(async () => {
+      setStatus('Reading and hashing the file in this browser.');
+      setVerification(await verifyFile(file, selectedBundle)); setTamperResult(null); setStatus('');
+    });
+  }
+
+  function deleteBundle(bundle: SignatureBundle, question: string, message: string) {
+    if (!window.confirm(question)) return;
+    void run(async () => {
+      const key = bundleKey(bundle);
+      const saved = await store({ ...workspace, bundles: workspace.bundles.filter((item) => bundleKey(item) !== key) });
+      chooseBundle(null);
+      setStatus(saved ? message : `${message} The change is only in this session.`);
+    });
+  }
+
+  function deleteSelectedBundle() {
+    if (!selectedBundle) return;
+    const count = selectedBundle.signatures.length;
+    deleteBundle(selectedBundle,
+      `Delete the saved bundle for ${selectedBundle.file.name}? It holds ${count} ${count === 1 ? 'signature' : 'signatures'}. Export it first if you need it. Your signing identity is kept.`,
+      'Bundle deleted. Your signing identity was kept.');
+  }
+
+  function removeSignature(index: number) {
+    if (!selectedBundle) return;
+    const record = selectedBundle.signatures[index];
+    if (selectedBundle.signatures.length === 1) {
+      deleteBundle(selectedBundle,
+        `Delete the saved bundle for ${selectedBundle.file.name}? Its only signature, by ${record.signer}, is invalid, so the bundle would be empty. Your signing identity is kept.`,
+        'Invalid signature removed with its empty bundle.');
+      return;
+    }
+    if (!window.confirm(`Remove the invalid signature by ${record.signer}? It does not authenticate this file. The other signatures are kept.`)) return;
+    void run(async () => {
+      const key = bundleKey(selectedBundle);
+      const trimmed = parseBundle(JSON.stringify({ ...selectedBundle, signatures: selectedBundle.signatures.filter((_, position) => position !== index) }), 'Saved bundle');
+      const saved = await store({ ...workspace, bundles: workspace.bundles.map((item) => bundleKey(item) === key ? trimmed : item) });
+      setVerification(null); setTamperResult(null);
+      setStatus(saved ? 'Invalid signature removed.' : 'Invalid signature removed for this session.');
+    });
+  }
+
+  async function copyFingerprint(fingerprint: string) {
+    try { await navigator.clipboard.writeText(fingerprint); setError(''); setStatus('Key fingerprint copied.'); }
+    catch { setError('This browser did not allow copying. Select the fingerprint text and copy it.'); }
   }
 
   async function testChangedBytes() {
@@ -321,6 +442,7 @@ export function LocalSigning() {
       <div className="form-actions">
         <button ref={importButtonRef} type="button" className="btn btn-secondary" disabled={disabled} onClick={() => { setError(''); setDialog(true); }}><Upload size={16} strokeWidth={1.75} aria-hidden="true" />Import bundle</button>
         <button ref={exportButtonRef} id={`${id}-export`} type="button" className="btn btn-secondary" disabled={disabled || !selectedBundle} onClick={exportBundle}><Download size={16} strokeWidth={1.75} aria-hidden="true" />Export bundle</button>
+        <button type="button" className="btn btn-secondary" disabled={disabled || storageReadBlocked || !selectedBundle} onClick={deleteSelectedBundle}><Trash2 size={16} strokeWidth={1.75} aria-hidden="true" />Delete bundle</button>
         {workspace.bundles.length > 0 && <button type="button" className="btn btn-secondary" disabled={disabled || storageReadBlocked} onClick={() => {
           if (!window.confirm('Clear all signature bundles from this browser? Export the bundles you need first. Your signing identity will be kept.')) return;
           void run(async () => {
@@ -378,6 +500,7 @@ export function LocalSigning() {
             <div className={`local-dropzone ${dragging ? 'is-dragging' : ''}`} onDragOver={(event) => { event.preventDefault(); if (!disabled) setDragging(true); }} onDragLeave={() => setDragging(false)} onDrop={dropFile}>
               <FileUp size={24} strokeWidth={1.5} aria-hidden="true" />
               <p className="local-file-prompt">{selectedBundle ? 'Choose the original file to verify or sign' : 'Drop one file here, or choose a file'}</p>
+              <p className="form-note">Files up to {FILE_LIMIT_LABEL}. The browser reads the whole file into memory to hash it.</p>
               <label className="field local-file-field"><span className="field-label">Choose file</span><input ref={fileInputRef} type="file" disabled={disabled} onChange={(event) => chooseFile(event.target.files?.[0] ?? null)} /></label>
             </div>
             {file && <p className="local-selected-file"><Check size={16} aria-hidden="true" /><span><strong className="local-wrap">{file.name}</strong><br /><span className="mono cell-sub">{byteLabel(file.size)} selected in memory</span></span></p>}
@@ -401,6 +524,8 @@ export function LocalSigning() {
           <section aria-labelledby={`${id}-identity-title`}>
             <h3 id={`${id}-identity-title`} className="panel-heading">Signing identity</h3>
             {identity && <div className="local-identity-summary"><p className="sig-ink">{identity.name}</p><p className="cell-sub">Created {formatTimestamp(identity.createdAt)}</p>
+              <KeyFingerprint jwk={identity.publicKeyJwk} label={identity.name} onCopy={(value) => void copyFingerprint(value)} />
+              {durability && <p className="form-note local-durability">{durability === 'persistent' ? 'Storage is marked persistent for this site.' : durability === 'not-persistent' ? 'This browser may clear the key under storage pressure. If it does, create a new identity; earlier signatures stay verifiable.' : 'This browser does not report whether storage is persistent, so it may clear the key under storage pressure.'}</p>}
               <button type="button" className="btn btn-secondary local-full-width" disabled={disabled} onClick={() => {
                 try { downloadFile(`${identity.name}.public-key.json`, JSON.stringify(identity.publicKeyJwk, null, 2), 'application/json'); setStatus('Public key exported.'); }
                 catch (reason) { setError(errorMessage(reason)); }
@@ -423,18 +548,26 @@ export function LocalSigning() {
 
           <section aria-labelledby={`${id}-signatures-title`}>
             <h3 id={`${id}-signatures-title`} className="panel-heading">Signatures</h3>
-            {!selectedBundle ? <p className="form-note">No signatures yet.</p> : <ul className="dense-list">{selectedBundle.signatures.map((signature, index) => <li key={`${signature.signature}:${index}`} className="sig-block"><p className="sig-ink">{signature.signer}</p><p className="cell-sub mono">{formatTimestamp(signature.signedAt)}</p></li>)}</ul>}
+            {!selectedBundle ? <p className="form-note">No signatures yet.</p> : <ul className="dense-list">{selectedBundle.signatures.map((signature, index) => {
+              const invalid = signatureChecks?.[index] && !signatureChecks[index].valid;
+              return <li key={`${signature.signature}:${index}`} className="sig-block"><p className="sig-ink">{signature.signer}</p><p className="cell-sub mono">{formatTimestamp(signature.signedAt)}</p>
+                <KeyFingerprint jwk={signature.publicKeyJwk} label={signature.signer} onCopy={(value) => void copyFingerprint(value)} />
+                {invalid && <><p className="local-bad local-invalid-note">Invalid signature. It does not authenticate this file.</p>
+                  <button type="button" className="btn btn-secondary local-full-width" disabled={disabled || storageReadBlocked} aria-label={`Remove invalid signature by ${signature.signer}`} onClick={() => removeSignature(index)}><Trash2 size={16} strokeWidth={1.75} aria-hidden="true" />Remove</button></>}
+              </li>;
+            })}</ul>}
           </section>
 
           <section className="local-verification" aria-labelledby={`${id}-verify-title`}>
             <h3 id={`${id}-verify-title`} className="panel-heading">Verification result</h3>
             {!verification ? <p className="form-note">Choose a bundle and its original file, then verify the file.</p> : <div className="result" role="status">
               <p className={`local-result-line ${verified ? 'local-ok' : 'local-bad'}`}><span className={`status-dot ${verified ? 'ok' : 'bad'}`} aria-hidden="true" />{verified ? 'File and signatures verified' : 'Verification failed'}</p>
-              <p className="form-note">{verification.matchesFile ? 'File name, size, and bytes match the bundle.' : 'File name, size, or bytes do not match the bundle.'}</p>
-              <ul className="dense-list">{verification.signatures.map((signature, index) => <li key={index} className="verify-row"><p className="dense-name local-wrap">{signature.signer}</p><p className={signature.valid ? 'local-ok' : 'local-bad'}>{signature.valid ? 'Signature valid' : 'Signature fails'}</p>{signature.error && <p className="cell-sub">{signature.error}</p>}</li>)}</ul>
+              <p className="form-note">{verification.matchesFile ? 'File size and bytes match the bundle.' : !verification.sizeMatches ? `File size differs: the selected file is ${file ? byteLabel(file.size) : 'a different size'} and the bundle expects ${byteLabel(selectedBundle?.file.size ?? 0)}.` : 'File content differs: the SHA-256 hash of the selected file does not match the bundle.'}</p>
+              {!verification.nameMatches && selectedBundle && <p className="form-note local-warn">File name differs from the signed name: {selectedBundle.file.name}</p>}
+              <ul className="dense-list">{verification.signatures.map((signature, index) => <li key={index} className="verify-row"><p className="dense-name local-wrap">{signature.signer}</p><p className={signature.valid ? 'local-ok' : 'local-bad'}>{signature.valid ? 'Signature valid' : 'Signature fails'}</p>{signature.error && <p className="cell-sub">{signature.error}</p>}<KeyFingerprint fingerprint={signature.fingerprint} label={signature.signer} /></li>)}</ul>
             </div>}
           </section>
-          <p className="local-key-boundary">Signatures prove a file matches what a key signed. They do not prove who owns the key.</p>
+          <p className="local-key-boundary">Signatures prove a file matches what a key signed. They do not prove who owns the key. Compare the key fingerprint with the signer through another channel, such as a call or a message you already trust.</p>
         </aside>
       </div>
     </div>

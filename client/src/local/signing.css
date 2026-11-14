@@ -42,6 +42,13 @@
 .local-signing-margin .sig-block { padding-bottom: 0.75rem; margin-bottom: 1rem; }
 .local-signing-margin .sig-block .sig-ink { font-size: 26px; overflow-wrap: anywhere; }
 .local-verification { margin-top: 1.5rem; }
+.local-fingerprint { margin-top: 0.6rem; }
+.local-fingerprint-label { color: var(--ink-2); font-size: 12px; }
+.local-fingerprint-value { font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
+.local-copy { margin-top: 0.4rem; padding-inline: 0.75rem; }
+.local-invalid-note { margin-top: 0.6rem; margin-bottom: 0.5rem; font-size: 13px; font-weight: 600; }
+.local-durability { margin-top: 0.6rem; font-size: 12px; }
+.local-verification .verify-row .local-fingerprint { flex-basis: 100%; }
 .local-result-line { display: flex; gap: 0.6rem; align-items: baseline; font-size: 14px; font-weight: 600; }
 .local-result-line .status-dot { flex: none; }
 .local-ok { color: var(--ok); }
