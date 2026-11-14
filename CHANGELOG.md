@@ -16,6 +16,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Changed
 - New visual identity built around paper and ink: a parchment desk, the open agreement shown as a white sheet in a serif face, and a margin column on the right holding signature blocks and the verification result. Agreements now sit in a slim list on the left, the tamper tester and audit trail sit under the sheet, and hashes and signatures are set in a typewriter face. The overview strip and table are gone; a one-line tally replaces them. Behavior and features are unchanged.
 
+## [1.1.1] - 2026-11-14
+
+### Fixed
+- A renamed file no longer fails verification. Verification depends on the file's size and SHA-256 only, a different name shows as a separate notice, and a failed check says whether the size or the content differs.
+- Signing a new file as a returning user no longer fails against the first saved bundle. The signature goes into a new bundle, or into the saved bundle that already holds the same bytes, and the page says which.
+- Verification results and the signature list now show the key fingerprint (RFC 7638 thumbprint) for every signature and for your own identity, with a copy button and a reminder to compare it with the signer through another channel.
+- A file is read and hashed once per operation instead of two or three times. Files over 128 MiB are refused with a message that states the limit, and the page shows a busy state while it hashes.
+- The app asks the browser to keep its storage when an identity is created and reports whether storage is persistent or may be cleared under storage pressure.
+- One bad imported signature no longer blocks a bundle. It shows as invalid and can be removed, signing still works, and a single saved bundle can be deleted without clearing the workspace.
+- A signing key can no longer sign the same bundle twice.
+- The offline cache no longer keeps serving an old page. Pages load from the network first with the saved copy as the offline fallback, precaching bypasses the HTTP cache, and a quiet notice with a Reload button appears when a new version is ready.
+- Downloads no longer risk being cancelled because the file link was released immediately. The link now stays valid for two seconds.
+
 ## [1.0.0] - 2026-10-02
 
 ### Added
